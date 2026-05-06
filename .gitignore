@@ -1,30 +1,43 @@
-# Logs
+# Dependencies
+node_modules/
 
-logs
-_.log
-npm-debug.log_
+# Build output
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
 # Environment variables
 .env
-.env.local
+.env.*
+!.env.example
 
-# Editor directories and files
+# Local app files
+*.local
+.cache/
+.tmp/
+tmp/
 
-.vscode/_
+# Tooling
+.refine/
+
+# Editors and OS files
+.vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
-_.suo
-_.ntvs_
-_.njsproj
-_.sln
-\*.sw?
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

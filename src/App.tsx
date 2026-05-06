@@ -1,41 +1,42 @@
-import { GitHubBanner, Refine, WelcomePage } from "@refinedev/core";
+import {
+  Authenticated,
+  GitHubBanner,
+  Refine,
+} from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 
 import { useNotificationProvider } from "@refinedev/antd";
 import "@refinedev/antd/dist/reset.css";
 
-import dataProvider, {
-  GraphQLClient,
-  liveProvider,
-} from "@refinedev/nestjs-query";
+import { authProvider, dataProvider, liveProvider } from "./providers";
 import routerProvider, {
+  CatchAllNavigate,
   DocumentTitleHandler,
+  NavigateToResource,
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
 import { App as AntdApp } from "antd";
-import { createClient } from "graphql-ws";
-import { BrowserRouter, Route, Routes } from "react-router";
-import { ColorModeContextProvider } from "./contexts/color-mode";
-import { authProvider } from "./providers/auth";
-
-const API_URL = "https://api.nestjs-query.refine.dev/graphql";
-const WS_URL = "wss://api.nestjs-query.refine.dev/graphql";
-
-const gqlClient = new GraphQLClient(API_URL);
-const wsClient = createClient({ url: WS_URL });
+import { BrowserRouter, Route, Routes, Outlet } from "react-router";
+import {
+  ForgotPassword,
+  Home,
+  Login,
+  Register,
+  UpdatePassword,
+} from "./pages";
+import Layout from "./components/layout/index";
 
 function App() {
   return (
     <BrowserRouter>
       <GitHubBanner />
       <RefineKbarProvider>
-        <ColorModeContextProvider>
           <AntdApp>
             <DevtoolsProvider>
               <Refine
-                dataProvider={dataProvider(gqlClient)}
-                liveProvider={liveProvider(wsClient)}
+                dataProvider={dataProvider}
+                liveProvider={liveProvider}
                 notificationProvider={useNotificationProvider}
                 routerProvider={routerProvider}
                 authProvider={authProvider}
@@ -45,9 +46,62 @@ function App() {
                   projectId: "US19gb-DrXOkr-nnZJjn",
                   liveMode: "auto",
                 }}
+                resources={[
+                  {
+                    name: "home",
+                    list: "/",
+                  },
+                  {
+                    name: "projects",
+                    list: "/projects",
+                  },
+                  {
+                    name: "tasks",
+                    list: "/kanban",
+                  },
+                  {
+                    name: "profiles",
+                  },
+                  {
+                    name: "project_members",
+                  },
+                ]}
               >
                 <Routes>
-                  <Route index element={<WelcomePage />} />
+                  <Route
+                    element={
+                      <Authenticated
+                        key="auth-pages"
+                        fallback={<Outlet />}
+                      >
+                        <NavigateToResource resource="home" />
+                      </Authenticated>
+                    }
+                  >
+                    <Route path="/forgot-password" element={<ForgotPassword />} />
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/register" element={<Register />} />
+                    <Route path="/update-password" element={<UpdatePassword />} />
+                  </Route>
+
+                  <Route
+                    element={
+                      <Authenticated
+                        key="authenticated-layout"
+                        fallback={<CatchAllNavigate to="/login" />}
+                      >
+                        <Layout>
+                          <Outlet />
+                        </Layout>
+                      </Authenticated>
+                    }
+                  >
+                    <Route index element={<Home />} />
+                    <Route path="/projects" element={<Home />} />
+                    <Route path="/kanban" element={<Home />} />
+                  </Route>
+
+                  <Route path="*" element={<CatchAllNavigate to="/" />} />
                 </Routes>
                 <RefineKbar />
                 <UnsavedChangesNotifier />
@@ -56,7 +110,6 @@ function App() {
               <DevtoolsPanel />
             </DevtoolsProvider>
           </AntdApp>
-        </ColorModeContextProvider>
       </RefineKbarProvider>
     </BrowserRouter>
   );
