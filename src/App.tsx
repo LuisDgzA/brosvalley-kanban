@@ -21,6 +21,7 @@ import { BrowserRouter, Route, Routes, Outlet } from "react-router";
 import {
   ForgotPassword,
   Home,
+  Kanban,
   Login,
   ProjectsCreate,
   ProjectsEdit,
@@ -107,7 +108,7 @@ function App() {
                     <Route path="/projects/create" element={<ProjectsCreate />} />
                     <Route path="/projects/edit/:id" element={<ProjectsEdit />} />
                     <Route path="/projects/show/:id" element={<ProjectsShow />} />
-                    <Route path="/kanban" element={<Home />} />
+                    <Route path="/kanban" element={<Kanban />} />
                   </Route>
 
                   <Route path="*" element={<CatchAllNavigate to="/" />} />
