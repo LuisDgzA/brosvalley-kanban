@@ -22,6 +22,10 @@ import {
   ForgotPassword,
   Home,
   Login,
+  ProjectsCreate,
+  ProjectsEdit,
+  ProjectsList,
+  ProjectsShow,
   Register,
   UpdatePassword,
 } from "./pages";
@@ -44,7 +48,6 @@ function App() {
                   syncWithLocation: true,
                   warnWhenUnsavedChanges: true,
                   projectId: "US19gb-DrXOkr-nnZJjn",
-                  liveMode: "auto",
                 }}
                 resources={[
                   {
@@ -54,6 +57,9 @@ function App() {
                   {
                     name: "projects",
                     list: "/projects",
+                    create: "/projects/create",
+                    edit: "/projects/edit/:id",
+                    show: "/projects/show/:id",
                   },
                   {
                     name: "tasks",
@@ -97,7 +103,10 @@ function App() {
                     }
                   >
                     <Route index element={<Home />} />
-                    <Route path="/projects" element={<Home />} />
+                    <Route path="/projects" element={<ProjectsList />} />
+                    <Route path="/projects/create" element={<ProjectsCreate />} />
+                    <Route path="/projects/edit/:id" element={<ProjectsEdit />} />
+                    <Route path="/projects/show/:id" element={<ProjectsShow />} />
                     <Route path="/kanban" element={<Home />} />
                   </Route>
 
