@@ -33,11 +33,16 @@ const Header = () => {
 
   return (
     <Layout.Header
+      className="app-topbar"
       style={{
         display: "flex",
         alignItems: screens.md ? "center" : "flex-start",
         justifyContent: "space-between",
         flexWrap: "wrap",
+        position: "sticky",
+        top: 0,
+        zIndex: 30,
+        flexShrink: 0,
         minHeight: 78,
         height: "auto",
         lineHeight: "normal",

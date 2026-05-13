@@ -54,6 +54,9 @@ function App() {
                   {
                     name: "home",
                     list: "/",
+                    meta: {
+                      label: "Home",
+                    },
                   },
                   {
                     name: "projects",

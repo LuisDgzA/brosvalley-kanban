@@ -1,4 +1,4 @@
-import { ThemedLayout, ThemedTitle } from "@refinedev/antd";
+import { ThemedLayout, ThemedSider, ThemedTitle } from "@refinedev/antd";
 
 import Header from "./Header";
 
@@ -7,6 +7,7 @@ const Layout = ({ children }: React.PropsWithChildren) => {
     <div className="app-shell">
       <ThemedLayout
         Header={Header}
+        Sider={(siderProps) => <ThemedSider {...siderProps} fixed />}
         Title={(titleProps) => (
           <ThemedTitle
             {...titleProps}

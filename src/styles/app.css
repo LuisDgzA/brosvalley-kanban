@@ -42,30 +42,102 @@ body {
   overflow-x: hidden;
 }
 
+html {
+  scrollbar-color: rgba(15, 118, 110, 0.55) rgba(15, 23, 42, 0.08);
+  scrollbar-width: thin;
+}
+
 a {
   color: inherit;
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-shell .ant-layout,
+.app-shell > .ant-layout,
+.app-shell .ant-layout-has-sider,
 .app-shell .ant-layout-content,
 .app-shell .ant-layout-content > div,
 .app-shell .ant-layout-content > div > div {
   min-width: 0;
 }
 
+.app-shell > .ant-layout,
+.app-shell > .ant-layout > .ant-layout {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell > .ant-layout > .ant-layout {
+  min-height: 0;
+}
+
+.app-shell .ant-layout-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .app-shell .ant-layout-content > div:first-child {
   padding: 0 !important;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-content {
+  height: 100%;
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
   padding: 28px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(15, 118, 110, 0.55) rgba(15, 23, 42, 0.08);
+  scrollbar-width: thin;
+}
+
+.app-content::-webkit-scrollbar,
+.kanban-board-scroll::-webkit-scrollbar,
+.app-table-wrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app-content::-webkit-scrollbar-track,
+.kanban-board-scroll::-webkit-scrollbar-track,
+.app-table-wrap::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
+}
+
+.app-content::-webkit-scrollbar-thumb,
+.kanban-board-scroll::-webkit-scrollbar-thumb,
+.app-table-wrap::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(15, 118, 110, 0.82), rgba(29, 78, 216, 0.72)) padding-box;
+  background-clip: padding-box;
+}
+
+.app-content::-webkit-scrollbar-thumb:hover,
+.kanban-board-scroll::-webkit-scrollbar-thumb:hover,
+.app-table-wrap::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(180deg, rgba(15, 118, 110, 0.96), rgba(29, 78, 216, 0.88)) padding-box;
+  background-clip: padding-box;
+}
+
+.app-content::-webkit-scrollbar-corner,
+.kanban-board-scroll::-webkit-scrollbar-corner,
+.app-table-wrap::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .page-stack {
@@ -242,10 +314,9 @@ a {
 
 .auth-shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 440px);
-  gap: 28px;
-  align-items: stretch;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   padding: clamp(16px, 4vw, 32px);
 }
 
@@ -273,8 +344,8 @@ a {
 }
 
 .auth-card {
-  align-self: center;
   width: 100%;
+  max-width: 460px;
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: 32px;
   background: rgba(255, 255, 255, 0.88);
@@ -322,6 +393,8 @@ a {
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 8px;
+  scrollbar-color: rgba(15, 118, 110, 0.55) rgba(15, 23, 42, 0.08);
+  scrollbar-width: thin;
 }
 
 .kanban-board {
@@ -355,16 +428,7 @@ a {
 
 @media (max-width: 960px) {
   .auth-shell {
-    grid-template-columns: 1fr;
     padding: 20px;
-  }
-
-  .auth-card {
-    order: -1;
-  }
-
-  .auth-panel {
-    min-height: 280px;
   }
 }
 
