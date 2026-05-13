@@ -7,7 +7,19 @@ import {
   ShowButton,
   useTable,
 } from "@refinedev/antd";
-import { Avatar, Space, Table, Tooltip, Typography } from "antd";
+import {
+  Avatar,
+  Button,
+  Card,
+  Col,
+  Empty,
+  Grid,
+  Row,
+  Space,
+  Tooltip,
+  Typography,
+} from "antd";
+import { Link } from "react-router";
 
 import type { ProjectMemberRecord, ProjectRecord } from "./types";
 
@@ -15,6 +27,7 @@ const getMemberDisplayName = (member: ProjectMemberRecord) =>
   member?.profiles?.name || member?.profiles?.email || "User";
 
 export const ProjectsList = () => {
+  const screens = Grid.useBreakpoint();
   const { tableProps } = useTable<ProjectRecord>({
     resource: "projects",
     meta: {
@@ -31,54 +44,92 @@ export const ProjectsList = () => {
       headerButtons={() => <CreateButton resource="projects" />}
       title="Proyectos"
     >
-      <Table {...tableProps} rowKey="id">
-        <Table.Column<ProjectRecord>
-          dataIndex="name"
-          key="name"
-          title="Nombre"
-          render={(value: string) => <Typography.Text strong>{value}</Typography.Text>}
-        />
-        <Table.Column<ProjectRecord>
-          dataIndex="description"
-          key="description"
-          title="Descripcion"
-          render={(value: string | null) => value || "Sin descripcion"}
-        />
-        <Table.Column<ProjectRecord>
-          dataIndex="due_date"
-          key="due_date"
-          title="Fecha limite"
-          render={(value: string | null) =>
-            value ? <DateField format="YYYY-MM-DD" value={value} /> : "Sin fecha"
-          }
-        />
-        <Table.Column<ProjectRecord>
-          key="members"
-          title="Miembros"
-          render={(_, record) => (
-            <Avatar.Group max={{ count: 4 }}>
-              {(record.project_members ?? []).map((member) => (
-                <Tooltip key={member.id} title={getMemberDisplayName(member)}>
-                  <Avatar src={member.profiles?.avatar_url ?? undefined}>
-                    {getMemberDisplayName(member).slice(0, 1).toUpperCase()}
-                  </Avatar>
-                </Tooltip>
-              ))}
-            </Avatar.Group>
-          )}
-        />
-        <Table.Column<ProjectRecord>
-          key="actions"
-          title="Acciones"
-          render={(_, record) => (
-            <Space>
-              <ShowButton hideText recordItemId={record.id} />
-              <EditButton hideText recordItemId={record.id} />
-              <DeleteButton hideText recordItemId={record.id} />
-            </Space>
-          )}
-        />
-      </Table>
+      <div className="page-stack">
+        <div className="page-hero">
+          <div className="section-heading-copy">
+            <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+              Portfolio actual
+            </Typography.Text>
+            <Typography.Title level={2} style={{ margin: 0, color: "#f8fafc" }}>
+              Gestiona proyectos con lectura ejecutiva
+            </Typography.Title>
+            <Typography.Text style={{ color: "rgba(248,250,252,0.82)", maxWidth: 680 }}>
+              Cada tarjeta resalta alcance, responsables y fecha objetivo para
+              decidir prioridades sin perder detalle operativo.
+            </Typography.Text>
+          </div>
+        </div>
+
+        {tableProps.loading ? (
+          <Card className="glass-card" loading />
+        ) : (tableProps.dataSource?.length ?? 0) === 0 ? (
+          <Card className="glass-card">
+            <Empty description="Todavia no hay proyectos creados." />
+          </Card>
+        ) : (
+          <Row gutter={[18, 18]}>
+            {(tableProps.dataSource ?? []).map((record) => (
+              <Col key={record.id} lg={8} md={12} xs={24}>
+                <Card className="project-card">
+                  <Space direction="vertical" size={18} style={{ width: "100%" }}>
+                    <div className="section-heading">
+                      <div className="section-heading-copy">
+                        <Typography.Title level={4} style={{ margin: 0 }}>
+                          {record.name}
+                        </Typography.Title>
+                        <Typography.Text type="secondary">
+                          {record.description || "Sin descripcion"}
+                        </Typography.Text>
+                      </div>
+                    </div>
+
+                    <div className="project-card-meta">
+                      <div className="project-card-stat">
+                        <Typography.Text type="secondary">Fecha limite</Typography.Text>
+                        <div>
+                          {record.due_date ? (
+                            <DateField format="YYYY-MM-DD" value={record.due_date} />
+                          ) : (
+                            <Typography.Text strong>Sin fecha</Typography.Text>
+                          )}
+                        </div>
+                      </div>
+                      <div className="project-card-stat">
+                        <Typography.Text type="secondary">Equipo</Typography.Text>
+                        <Typography.Text strong>
+                          {(record.project_members ?? []).length} miembros
+                        </Typography.Text>
+                      </div>
+                    </div>
+
+                    <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                      <Typography.Text type="secondary">Responsables</Typography.Text>
+                      <Avatar.Group max={{ count: 4 }}>
+                        {(record.project_members ?? []).map((member) => (
+                          <Tooltip key={member.id} title={getMemberDisplayName(member)}>
+                            <Avatar src={member.profiles?.avatar_url ?? undefined}>
+                              {getMemberDisplayName(member).slice(0, 1).toUpperCase()}
+                            </Avatar>
+                          </Tooltip>
+                        ))}
+                      </Avatar.Group>
+                    </Space>
+
+                    <Space style={{ width: "100%" }} wrap>
+                      <ShowButton hideText recordItemId={record.id} />
+                      <EditButton hideText recordItemId={record.id} />
+                      <DeleteButton hideText recordItemId={record.id} />
+                      <Button block={!screens.sm} type="default">
+                        <Link to="/kanban">Ver tablero</Link>
+                      </Button>
+                    </Space>
+                  </Space>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        )}
+      </div>
     </List>
   );
 };

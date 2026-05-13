@@ -1,6 +1,5 @@
 import {
   Authenticated,
-  GitHubBanner,
   Refine,
 } from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
@@ -16,7 +15,7 @@ import routerProvider, {
   NavigateToResource,
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
-import { App as AntdApp } from "antd";
+import { App as AntdApp, ConfigProvider } from "antd";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router";
 import {
   ForgotPassword,
@@ -31,12 +30,13 @@ import {
   UpdatePassword,
 } from "./pages";
 import Layout from "./components/layout/index";
+import { appTheme } from "./theme";
 
 function App() {
   return (
     <BrowserRouter>
-      <GitHubBanner />
       <RefineKbarProvider>
+        <ConfigProvider theme={appTheme}>
           <AntdApp>
             <DevtoolsProvider>
               <Refine
@@ -120,6 +120,7 @@ function App() {
               <DevtoolsPanel />
             </DevtoolsProvider>
           </AntdApp>
+        </ConfigProvider>
       </RefineKbarProvider>
     </BrowserRouter>
   );

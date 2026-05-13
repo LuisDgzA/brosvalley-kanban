@@ -15,13 +15,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusOutlined } from "@ant-design/icons";
-import { DateField } from "@refinedev/antd";
+import {
+  CalendarOutlined,
+  FolderOpenOutlined,
+  HolderOutlined,
+  PlusOutlined,
+  TeamOutlined,
+} from "@ant-design/icons";
+import { DateField, useForm } from "@refinedev/antd";
 import {
   type HttpError,
   useCreate,
   useGetIdentity,
   useList,
+  useOne,
   useUpdate,
 } from "@refinedev/core";
 import dayjs, { type Dayjs } from "dayjs";
@@ -30,13 +37,13 @@ import {
   Badge,
   Button,
   Card,
-  Col,
   DatePicker,
+  Drawer,
   Empty,
   Form,
+  Grid,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Spin,
@@ -44,7 +51,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AuthUser } from "@/providers/auth";
 
@@ -109,6 +116,24 @@ type TaskMutationValues = {
   created_by: string | null;
 };
 
+type TaskEditValues = {
+  title: string;
+  description?: string;
+  assigned_to?: string;
+  project_id?: string;
+  due_date?: Dayjs | null;
+  status: KanbanStatus;
+};
+
+type NormalizedTaskEditValues = {
+  title: string;
+  description: string;
+  assigned_to: string;
+  project_id: string;
+  due_date: string;
+  status: KanbanStatus;
+};
+
 const statusColorMap: Record<KanbanStatus, string> = {
   TODO: "default",
   IN_PROGRESS: "blue",
@@ -123,7 +148,268 @@ const statusLabelMap: Record<KanbanStatus, string> = {
   DONE: "Done",
 };
 
-const KanbanCard = ({ task }: { task: KanbanTask }) => {
+const TaskDrawer = ({
+  taskId,
+  onClose,
+}: {
+  taskId: string | null;
+  onClose: () => void;
+}) => {
+  const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const initialValuesRef = useRef<NormalizedTaskEditValues | null>(null);
+  const screens = Grid.useBreakpoint();
+
+  const { result: taskResult, query: taskQuery } = useOne<KanbanTask>({
+    resource: "tasks",
+    id: taskId ?? "",
+    meta: {
+      select:
+        "id,title,description,status,project_id,assigned_to,due_date,created_by,created_at,updated_at",
+    },
+    queryOptions: {
+      enabled: Boolean(taskId),
+    },
+  });
+
+  const { formProps, onFinish, form, formLoading } = useForm<
+    KanbanTask,
+    HttpError,
+    any
+  >({
+    action: "edit",
+    id: taskId ?? undefined,
+    resource: "tasks",
+    redirect: false,
+  });
+
+  const safeFormProps = {
+    ...formProps,
+    initialValues: undefined,
+  };
+
+  const normalizeTaskEditValues = (
+    values: Partial<TaskEditValues> | null | undefined,
+  ): NormalizedTaskEditValues => ({
+    title: values?.title?.trim() ?? "",
+    description: values?.description?.trim() ?? "",
+    assigned_to: values?.assigned_to ?? "",
+    project_id: values?.project_id ?? "",
+    due_date: values?.due_date ? values.due_date.format("YYYY-MM-DD") : "",
+    status: values?.status ?? "TODO",
+  });
+
+  const requestClose = () => {
+    const currentValues = normalizeTaskEditValues(
+      form.getFieldsValue(true) as Partial<TaskEditValues>,
+    );
+
+    if (
+      !initialValuesRef.current ||
+      JSON.stringify(currentValues) === JSON.stringify(initialValuesRef.current)
+    ) {
+      onClose();
+      return;
+    }
+
+    setIsDiscardModalOpen(true);
+  };
+
+  const handleDiscardChanges = () => {
+    setIsDiscardModalOpen(false);
+    form.resetFields();
+    onClose();
+  };
+
+  const { result: profilesResult, query: profilesQuery } = useList<ProfileOption>({
+    resource: "profiles",
+    pagination: {
+      mode: "off",
+    },
+    sorters: [{ field: "name", order: "asc" }],
+    queryOptions: {
+      enabled: Boolean(taskId),
+    },
+  });
+
+  const { result: projectsResult, query: projectsQuery } = useList<ProjectOption>({
+    resource: "projects",
+    pagination: {
+      mode: "off",
+    },
+    sorters: [{ field: "name", order: "asc" }],
+    queryOptions: {
+      enabled: Boolean(taskId),
+    },
+  });
+
+  const profileOptions = (profilesResult.data ?? []).map((profile) => ({
+    label: profile.name || profile.email || profile.id,
+    value: profile.id,
+  }));
+
+  const projectOptions = (projectsResult.data ?? []).map((project) => ({
+    label: project.name,
+    value: project.id,
+  }));
+
+  useEffect(() => {
+    if (!taskResult || formLoading) {
+      return;
+    }
+
+    const initialValues: TaskEditValues = {
+      title: taskResult.title,
+      description: taskResult.description ?? undefined,
+      assigned_to: taskResult.assigned_to ?? undefined,
+      project_id: taskResult.project_id,
+      due_date: taskResult.due_date ? dayjs(taskResult.due_date) : null,
+      status: taskResult.status,
+    };
+
+    initialValuesRef.current = normalizeTaskEditValues(initialValues);
+    form.setFieldsValue(initialValues);
+  }, [form, formLoading, taskResult]);
+
+  useEffect(() => {
+    if (!taskId) {
+      initialValuesRef.current = null;
+      setIsDiscardModalOpen(false);
+    }
+  }, [taskId]);
+
+  const handleSubmit = async (values: TaskEditValues) => {
+    const payload = {
+      title: values.title.trim(),
+      description: values.description?.trim() || null,
+      assigned_to: values.assigned_to || null,
+      project_id: values.project_id || null,
+      due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
+      status: values.status,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      await onFinish(payload);
+      message.success("Tarea actualizada correctamente.");
+      onClose();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "No se pudo actualizar la tarea.";
+      message.error(errorMessage);
+    }
+  };
+
+  return (
+    <>
+      <Drawer
+        destroyOnHidden
+        extra={
+          <Space wrap>
+            <Button onClick={requestClose}>Cancelar</Button>
+            <Button
+              loading={formLoading}
+              type="primary"
+              onClick={() => form.submit()}
+            >
+              Guardar
+            </Button>
+          </Space>
+        }
+        onClose={requestClose}
+        open={Boolean(taskId)}
+        styles={{
+          body: {
+            padding: screens.sm ? 24 : 16,
+          },
+        }}
+        title="Detalle de tarea"
+        width={screens.md ? 420 : "100%"}
+      >
+        <Spin spinning={taskQuery.isLoading}>
+          <Form<TaskEditValues>
+            {...safeFormProps}
+            form={form}
+            layout="vertical"
+            onFinish={handleSubmit}
+          >
+            <Form.Item
+              label="Titulo"
+              name="title"
+              rules={[{ required: true, message: "Ingresa el titulo" }]}
+            >
+              <Input />
+            </Form.Item>
+
+            <Form.Item label="Descripcion" name="description">
+              <Input.TextArea rows={4} />
+            </Form.Item>
+
+            <Form.Item label="Asignado a" name="assigned_to">
+              <Select
+                allowClear
+                loading={profilesQuery.isLoading}
+                options={profileOptions}
+                placeholder="Selecciona un perfil"
+              />
+            </Form.Item>
+
+            <Form.Item
+              label="Proyecto"
+              name="project_id"
+              rules={[{ required: true, message: "Selecciona un proyecto" }]}
+            >
+              <Select
+                loading={projectsQuery.isLoading}
+                options={projectOptions}
+                placeholder="Selecciona un proyecto"
+              />
+            </Form.Item>
+
+            <Form.Item label="Fecha limite" name="due_date">
+              <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} />
+            </Form.Item>
+
+            <Form.Item
+              label="Status"
+              name="status"
+              rules={[{ required: true, message: "Selecciona un status" }]}
+            >
+              <Select
+                options={KANBAN_STATUSES.map((status) => ({
+                  label: statusLabelMap[status],
+                  value: status,
+                }))}
+              />
+            </Form.Item>
+          </Form>
+        </Spin>
+      </Drawer>
+
+      <Modal
+        cancelText="Seguir editando"
+        centered
+        okButtonProps={{ danger: true }}
+        okText="Descartar"
+        onCancel={() => setIsDiscardModalOpen(false)}
+        onOk={handleDiscardChanges}
+        open={isDiscardModalOpen}
+        title="Descartar cambios"
+        width={screens.sm ? 420 : "calc(100vw - 24px)"}
+        zIndex={1400}
+      >
+        Tienes cambios sin guardar. Si cierras ahora, se perderan.
+      </Modal>
+    </>
+  );
+};
+
+const KanbanCard = ({
+  task,
+  onOpen,
+}: {
+  task: KanbanTask;
+  onOpen: (taskId: string) => void;
+}) => {
   const {
     attributes,
     listeners,
@@ -156,12 +442,11 @@ const KanbanCard = ({ task }: { task: KanbanTask }) => {
 
   return (
     <Card
-      {...attributes}
-      {...listeners}
       ref={setNodeRef}
       size="small"
       style={style}
       hoverable
+      onClick={() => onOpen(task.id)}
       styles={{
         body: {
           padding: 14,
@@ -169,17 +454,39 @@ const KanbanCard = ({ task }: { task: KanbanTask }) => {
       }}
     >
       <Space direction="vertical" size={10} style={{ width: "100%" }}>
-        <Space align="start" style={{ justifyContent: "space-between", width: "100%" }}>
-          <Typography.Text strong>{task.title}</Typography.Text>
-          <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
+        <Space
+          align="start"
+          size={[8, 8]}
+          style={{ justifyContent: "space-between", width: "100%" }}
+          wrap
+        >
+          <Typography.Text strong style={{ display: "block" }}>
+            {task.title}
+          </Typography.Text>
+          <Space size={8} wrap>
+            <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
+            <Button
+              {...attributes}
+              {...listeners}
+              icon={<HolderOutlined />}
+              size="small"
+              type="text"
+              onClick={(event) => event.stopPropagation()}
+              style={{ cursor: "grab" }}
+            />
+          </Space>
         </Space>
 
         <Typography.Text type="secondary">
           {task.projects?.name || "Sin proyecto"}
         </Typography.Text>
 
-        <Space style={{ justifyContent: "space-between", width: "100%" }}>
-          <Space>
+        <Space
+          size={[10, 10]}
+          style={{ justifyContent: "space-between", width: "100%" }}
+          wrap
+        >
+          <Space size={10}>
             <Avatar src={task.assigned_profile?.avatar_url ?? undefined}>
               {assigneeLabel.slice(0, 1).toUpperCase()}
             </Avatar>
@@ -216,8 +523,15 @@ const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
       }}
     >
       <Space direction="vertical" size={10} style={{ width: "100%" }}>
-        <Space align="start" style={{ justifyContent: "space-between", width: "100%" }}>
-          <Typography.Text strong>{task.title}</Typography.Text>
+        <Space
+          align="start"
+          size={[8, 8]}
+          style={{ justifyContent: "space-between", width: "100%" }}
+          wrap
+        >
+          <Typography.Text strong style={{ display: "block" }}>
+            {task.title}
+          </Typography.Text>
           <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
         </Space>
 
@@ -225,8 +539,12 @@ const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
           {task.projects?.name || "Sin proyecto"}
         </Typography.Text>
 
-        <Space style={{ justifyContent: "space-between", width: "100%" }}>
-          <Space>
+        <Space
+          size={[10, 10]}
+          style={{ justifyContent: "space-between", width: "100%" }}
+          wrap
+        >
+          <Space size={10}>
             <Avatar src={task.assigned_profile?.avatar_url ?? undefined}>
               {assigneeLabel.slice(0, 1).toUpperCase()}
             </Avatar>
@@ -248,11 +566,14 @@ const KanbanColumn = ({
   status,
   tasks,
   onAdd,
+  onOpenTask,
 }: {
   status: KanbanStatus;
   tasks: KanbanTask[];
   onAdd: (status: KanbanStatus) => void;
+  onOpenTask: (taskId: string) => void;
 }) => {
+  const screens = Grid.useBreakpoint();
   const { setNodeRef, isOver } = useDroppable({
     id: status,
     data: {
@@ -263,10 +584,11 @@ const KanbanColumn = ({
 
   return (
     <Card
+      className="kanban-column-card"
       ref={setNodeRef}
       size="small"
       style={{
-        minHeight: 520,
+        minHeight: screens.md ? 520 : 420,
         background: isOver
           ? "linear-gradient(180deg, #eef6ff 0%, #f8fbff 100%)"
           : "#fafafa",
@@ -304,7 +626,9 @@ const KanbanColumn = ({
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           ) : (
-            tasks.map((task) => <KanbanCard key={task.id} task={task} />)
+            tasks.map((task) => (
+              <KanbanCard key={task.id} onOpen={onOpenTask} task={task} />
+            ))
           )}
         </Space>
       </SortableContext>
@@ -314,10 +638,12 @@ const KanbanColumn = ({
 
 export const Kanban = () => {
   const sensors = useSensors(useSensor(PointerSensor));
+  const screens = Grid.useBreakpoint();
   const { data: currentUser } = useGetIdentity<AuthUser>();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<KanbanStatus>("TODO");
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
   const [taskForm] = Form.useForm<TaskCreateValues>();
 
@@ -390,6 +716,8 @@ export const Kanban = () => {
 
   const selectedProjectName =
     projects.find((project) => project.id === selectedProjectId)?.name ?? null;
+  const unassignedTasks = tasks.filter((task) => !task.assigned_to).length;
+  const dueTasks = tasks.filter((task) => task.due_date).length;
 
   const openCreateModal = (status: KanbanStatus) => {
     setSelectedStatus(status);
@@ -403,6 +731,14 @@ export const Kanban = () => {
   const closeCreateModal = () => {
     setIsModalOpen(false);
     taskForm.resetFields();
+  };
+
+  const openTaskDrawer = (taskId: string) => {
+    setSelectedTaskId(taskId);
+  };
+
+  const closeTaskDrawer = () => {
+    setSelectedTaskId(null);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -506,19 +842,94 @@ export const Kanban = () => {
 
   return (
     <>
-      <Space direction="vertical" size={24} style={{ width: "100%" }}>
-        <div>
-          <Typography.Title level={2} style={{ marginBottom: 8 }}>
-            {selectedProjectName ? `Kanban / ${selectedProjectName}` : "Kanban"}
-          </Typography.Title>
-          <Typography.Text type="secondary">
-            {selectedProjectName
-              ? `Tablero filtrado para ${selectedProjectName}. Mueve tareas entre columnas y crea nuevas tarjetas por status.`
-              : "Mueve tareas entre columnas y crea nuevas tarjetas por status."}
-          </Typography.Text>
+      <div className="page-stack">
+        <div className="page-hero">
+          <div className="page-hero-content">
+            <div className="page-hero-main section-heading-copy">
+              <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+                Flujo operativo
+              </Typography.Text>
+              <Typography.Title level={2} style={{ margin: 0, color: "#f8fafc" }}>
+                {selectedProjectName ? `Kanban / ${selectedProjectName}` : "Kanban"}
+              </Typography.Title>
+              <Typography.Text style={{ color: "rgba(248,250,252,0.82)", maxWidth: 720 }}>
+                {selectedProjectName
+                  ? `Tablero filtrado para ${selectedProjectName}. Mueve tareas entre columnas y crea nuevas tarjetas por status.`
+                  : "Mueve tareas entre columnas, asigna responsables y detecta cuellos de botella rapidamente."}
+              </Typography.Text>
+            </div>
+
+            <div
+              style={{
+                flex: "1 1 320px",
+                display: "flex",
+                justifyContent: screens.md ? "flex-end" : "flex-start",
+              }}
+            >
+              <Space size={12} wrap>
+                <Card
+                  size="small"
+                  style={{
+                    minWidth: 160,
+                    borderRadius: 20,
+                    background: "rgba(255,255,255,0.12)",
+                    borderColor: "rgba(255,255,255,0.14)",
+                  }}
+                >
+                  <Space direction="vertical" size={4}>
+                    <FolderOpenOutlined style={{ color: "#f8fafc" }} />
+                    <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+                      Tareas totales
+                    </Typography.Text>
+                    <Typography.Title level={3} style={{ margin: 0, color: "#f8fafc" }}>
+                      {tasks.length}
+                    </Typography.Title>
+                  </Space>
+                </Card>
+                <Card
+                  size="small"
+                  style={{
+                    minWidth: 160,
+                    borderRadius: 20,
+                    background: "rgba(255,255,255,0.12)",
+                    borderColor: "rgba(255,255,255,0.14)",
+                  }}
+                >
+                  <Space direction="vertical" size={4}>
+                    <TeamOutlined style={{ color: "#f8fafc" }} />
+                    <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+                      Sin asignar
+                    </Typography.Text>
+                    <Typography.Title level={3} style={{ margin: 0, color: "#f8fafc" }}>
+                      {unassignedTasks}
+                    </Typography.Title>
+                  </Space>
+                </Card>
+                <Card
+                  size="small"
+                  style={{
+                    minWidth: 160,
+                    borderRadius: 20,
+                    background: "rgba(255,255,255,0.12)",
+                    borderColor: "rgba(255,255,255,0.14)",
+                  }}
+                >
+                  <Space direction="vertical" size={4}>
+                    <CalendarOutlined style={{ color: "#f8fafc" }} />
+                    <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+                      Con fecha
+                    </Typography.Text>
+                    <Typography.Title level={3} style={{ margin: 0, color: "#f8fafc" }}>
+                      {dueTasks}
+                    </Typography.Title>
+                  </Space>
+                </Card>
+              </Space>
+            </div>
+          </div>
         </div>
 
-        <Card size="small">
+        <Card className="glass-card" size="small">
           <Space direction="vertical" size={8} style={{ width: "100%" }}>
             <Typography.Text strong>Proyecto del tablero</Typography.Text>
             <Select
@@ -544,23 +955,26 @@ export const Kanban = () => {
             onDragEnd={handleDragEnd}
             sensors={sensors}
           >
-            <Row gutter={[16, 16]}>
-              {KANBAN_STATUSES.map((status) => (
-                <Col key={status} lg={6} md={12} xs={24}>
-                  <KanbanColumn
-                    onAdd={openCreateModal}
-                    status={status}
-                    tasks={tasksByStatus[status]}
-                  />
-                </Col>
-              ))}
-            </Row>
+            <div className="kanban-board-scroll">
+              <div className="kanban-board">
+                {KANBAN_STATUSES.map((status) => (
+                  <div key={status} className="kanban-board-column">
+                    <KanbanColumn
+                      onAdd={openCreateModal}
+                      onOpenTask={openTaskDrawer}
+                      status={status}
+                      tasks={tasksByStatus[status]}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
             <DragOverlay>
               {activeTask ? <KanbanCardPreview task={activeTask} /> : null}
             </DragOverlay>
           </DndContext>
         )}
-      </Space>
+      </div>
 
       <Modal
         confirmLoading={createMutation.isPending}
@@ -569,6 +983,7 @@ export const Kanban = () => {
         onOk={handleCreateTask}
         open={isModalOpen}
         title={`Nueva tarea en ${statusLabelMap[selectedStatus]}`}
+        width={screens.sm ? 560 : "calc(100vw - 24px)"}
       >
         <Form<TaskCreateValues> form={taskForm} layout="vertical">
           <Form.Item
@@ -609,6 +1024,8 @@ export const Kanban = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <TaskDrawer onClose={closeTaskDrawer} taskId={selectedTaskId} />
     </>
   );
 };

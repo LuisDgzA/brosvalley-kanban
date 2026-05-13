@@ -1,7 +1,4 @@
-import {
-  Edit,
-  useForm,
-} from "@refinedev/antd";
+import { Edit, useForm } from "@refinedev/antd";
 import {
   type HttpError,
   useGetIdentity,
@@ -13,15 +10,19 @@ import dayjs from "dayjs";
 import {
   Alert,
   Button,
+  Card,
+  Col,
   DatePicker,
+  Grid,
   Form,
   Input,
+  Row,
   Select,
   Space,
   Typography,
   message,
 } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AuthUser } from "@/providers/auth";
 
@@ -65,7 +66,8 @@ const PageWrapper = ({
 
 export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => {
   const isEdit = action === "edit";
-  const { show } = useNavigation();
+  const screens = Grid.useBreakpoint();
+  const { list, show } = useNavigation();
   const { data: currentUser } = useGetIdentity<AuthUser>();
   const [isSyncingMembers, setIsSyncingMembers] = useState(false);
 
@@ -77,8 +79,11 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
     },
   });
 
-  const { formProps, saveButtonProps, onFinish, query, formLoading, form } =
-    useForm<ProjectRecord, HttpError, any>({
+  const { formProps, saveButtonProps, onFinish, formLoading, form } = useForm<
+    ProjectRecord,
+    HttpError,
+    any
+  >({
     action,
     id: projectId,
     resource: "projects",
@@ -139,7 +144,6 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
     isEdit,
     membersQuery.isLoading,
     projectResult,
-    query?.data?.data,
   ]);
 
   const memberOptions = useMemo(
@@ -198,68 +202,105 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
         loading: Boolean(saveButtonProps.loading) || isSyncingMembers,
       }}
     >
-      <Form<ProjectFormValues>
-        {...safeFormProps}
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-      >
-        <Form.Item
-          label="Nombre"
-          name="name"
-          rules={[{ required: true, message: "Ingresa el nombre del proyecto" }]}
-        >
-          <Input placeholder="Lanzamiento Q3" size="large" />
-        </Form.Item>
+      <div className="page-stack">
+        <div className="page-hero">
+          <div className="section-heading-copy">
+            <Typography.Text style={{ color: "rgba(248,250,252,0.72)" }}>
+              {isEdit ? "Editar proyecto" : "Nuevo proyecto"}
+            </Typography.Text>
+            <Typography.Title level={2} style={{ margin: 0, color: "#f8fafc" }}>
+              {isEdit
+                ? "Ajusta alcance, fechas y participantes"
+                : "Crea un proyecto con estructura clara"}
+            </Typography.Title>
+            <Typography.Text style={{ color: "rgba(248,250,252,0.82)", maxWidth: 720 }}>
+              Una buena configuracion inicial facilita seguimiento, priorizacion y
+              responsabilidad compartida desde el primer dia.
+            </Typography.Text>
+          </div>
+        </div>
 
-        <Form.Item label="Descripcion" name="description">
-          <Input.TextArea
-            placeholder="Describe el alcance y objetivo del proyecto"
-            rows={5}
-          />
-        </Form.Item>
-
-        <Form.Item label="Fecha limite" name="due_date">
-          <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} />
-        </Form.Item>
-
-        <Form.Item label="Miembros" name="member_ids">
-          <Select
-            allowClear
-            loading={profilesLoading || membersLoading}
-            mode="multiple"
-            optionFilterProp="label"
-            options={memberOptions}
-            placeholder="Selecciona a los miembros del proyecto"
-            size="large"
-          />
-        </Form.Item>
-
-        <Alert
-          message="Miembros del proyecto"
-          description="Al guardar sincronizaremos la tabla `project_members` con la seleccion actual."
-          showIcon
-          style={{ marginBottom: 24 }}
-          type="info"
-        />
-
-        <Space direction="vertical" size={12} style={{ width: "100%" }}>
-          <Typography.Text strong>Asignacion de miembros</Typography.Text>
-          <Typography.Text type="secondary">
-            Selecciona los perfiles que participaran en este proyecto.
-          </Typography.Text>
-        </Space>
-
-        <Form.Item style={{ marginTop: 24, marginBottom: 0 }}>
-          <Button
-            htmlType="submit"
-            loading={Boolean(saveButtonProps.loading) || isSyncingMembers}
-            type="primary"
+        <Card className="glass-card">
+          <Form<ProjectFormValues>
+            {...safeFormProps}
+            form={form}
+            layout="vertical"
+            onFinish={handleSubmit}
           >
-            {isEdit ? "Guardar cambios" : "Crear proyecto"}
-          </Button>
-        </Form.Item>
-      </Form>
+            <Row gutter={[16, 0]}>
+              <Col lg={16} md={14} xs={24}>
+                <Form.Item
+                  label="Nombre"
+                  name="name"
+                  rules={[{ required: true, message: "Ingresa el nombre del proyecto" }]}
+                >
+                  <Input placeholder="Lanzamiento Q3" size="large" />
+                </Form.Item>
+              </Col>
+
+              <Col lg={8} md={10} xs={24}>
+                <Form.Item label="Fecha limite" name="due_date">
+                  <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+
+              <Col xs={24}>
+                <Form.Item label="Descripcion" name="description">
+                  <Input.TextArea
+                    placeholder="Describe el alcance y objetivo del proyecto"
+                    rows={screens.sm ? 5 : 4}
+                  />
+                </Form.Item>
+              </Col>
+
+              <Col xs={24}>
+                <Form.Item label="Miembros" name="member_ids">
+                  <Select
+                    allowClear
+                    loading={profilesLoading || membersLoading}
+                    maxTagCount="responsive"
+                    mode="multiple"
+                    optionFilterProp="label"
+                    options={memberOptions}
+                    placeholder="Selecciona a los miembros del proyecto"
+                    size="large"
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Alert
+              message="Miembros del proyecto"
+              description="Al guardar sincronizaremos la tabla `project_members` con la seleccion actual."
+              showIcon
+              style={{ marginBottom: 24 }}
+              type="info"
+            />
+
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              <Typography.Text strong>Asignacion de miembros</Typography.Text>
+              <Typography.Text type="secondary">
+                Selecciona los perfiles que participaran en este proyecto.
+              </Typography.Text>
+            </Space>
+
+            <Form.Item style={{ marginTop: 24, marginBottom: 0 }}>
+              <div className="app-form-actions">
+                <Button onClick={() => list("projects")}>
+                  Volver al listado
+                </Button>
+                <Button
+                  htmlType="submit"
+                  loading={Boolean(saveButtonProps.loading) || isSyncingMembers}
+                  type="primary"
+                >
+                  {isEdit ? "Guardar cambios" : "Crear proyecto"}
+                </Button>
+              </div>
+            </Form.Item>
+          </Form>
+        </Card>
+      </div>
     </PageWrapper>
   );
 };

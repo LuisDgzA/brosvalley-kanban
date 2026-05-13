@@ -4,14 +4,26 @@ import Header from "./Header";
 
 const Layout = ({ children }: React.PropsWithChildren) => {
   return (
-    <ThemedLayout
-      Header={Header}
-      Title={(titleProps) => (
-        <ThemedTitle {...titleProps} text="BrosValley CRM" />
-      )}
-    >
-      {children}
-    </ThemedLayout>
+    <div className="app-shell">
+      <ThemedLayout
+        Header={Header}
+        Title={(titleProps) => (
+          <ThemedTitle
+            {...titleProps}
+            icon={null}
+            text="BrosValley CRM"
+            wrapperStyles={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: "#f8fafc",
+              letterSpacing: "0.01em",
+            }}
+          />
+        )}
+      >
+        <div className="app-content">{children}</div>
+      </ThemedLayout>
+    </div>
   );
 };
 
