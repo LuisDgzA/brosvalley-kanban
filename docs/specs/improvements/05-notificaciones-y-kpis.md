@@ -1,6 +1,6 @@
 # Spec — Notificaciones y KPIs
 
-Estado: Proposed  
+Estado: Implemented  
 Prioridad fuente: Media  
 Origen: `PROJECT_IMPROVEMENTS.md`
 
@@ -21,7 +21,7 @@ Permitir seguimiento proactivo y medicion basica del desempeno operativo.
 
 ## Alcance incluido
 
-- alertas por correo para eventos clave;
+- alertas en la interfaz grafica para eventos clave;
 - metricas de throughput y tiempos;
 - proyectos con mayor retraso;
 - tableros o widgets de KPIs.
@@ -44,12 +44,12 @@ Permitir seguimiento proactivo y medicion basica del desempeno operativo.
 
 - las notificaciones deben ser utiles y no excesivas;
 - debe definirse que significa `vence pronto`, recomendado: dentro de 48 horas o 72 horas;
-- el correo debe incluir contexto minimo: tarea, proyecto, responsable, fecha.
+- la notificacion debe incluir contexto minimo: tarea, proyecto, responsable, fecha.
 
 ### Criterios de aceptacion
 
-- un evento configurado dispara una notificacion;
-- el correo contiene contexto suficiente para actuar;
+- un evento configurado dispara una notificacion en la interfaz;
+- la notificacion contiene contexto suficiente para actuar;
 - no se generan duplicados obvios para el mismo evento sin cambio nuevo.
 
 ## 2. KPIs de equipo
@@ -82,10 +82,10 @@ Permitir seguimiento proactivo y medicion basica del desempeno operativo.
 
 - `completed_at` en `tasks`;
 - actividad o auditoria por cambios de estado;
-- proceso backend o cron para notificaciones.
+- mecanismo frontend para mostrar y gestionar notificaciones en la UI.
 
 ## Riesgos
 
 - sin definiciones duras los KPIs pierden confianza;
-- correos excesivos generan fatiga;
+- notificaciones excesivas generan fatiga;
 - si los cambios de estado no quedan auditados, algunos KPIs no seran fiables.

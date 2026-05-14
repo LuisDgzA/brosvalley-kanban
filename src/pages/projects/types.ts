@@ -27,8 +27,10 @@ export type TaskRecord = {
   title: string;
   description: string | null;
   status: string;
+  priority: string | null;
   due_date: string | null;
   assigned_to: string | null;
   project_id: string;
   created_at: string;
+  completed_at: string | null;
 };

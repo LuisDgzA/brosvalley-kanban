@@ -38,6 +38,7 @@ import {
   Button,
   Card,
   DatePicker,
+  Divider,
   Drawer,
   Empty,
   Form,
@@ -48,6 +49,8 @@ import {
   Space,
   Spin,
   Tag,
+  Tabs,
+  Timeline,
   Typography,
   message,
 } from "antd";
@@ -64,11 +67,29 @@ const KANBAN_STATUSES = [
 
 type KanbanStatus = (typeof KANBAN_STATUSES)[number];
 
+const PRIORITY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+type Priority = (typeof PRIORITY_LEVELS)[number];
+
+const priorityColorMap: Record<Priority, string> = {
+  LOW: "default",
+  MEDIUM: "blue",
+  HIGH: "orange",
+  CRITICAL: "red",
+};
+
+const priorityLabelMap: Record<Priority, string> = {
+  LOW: "Baja",
+  MEDIUM: "Media",
+  HIGH: "Alta",
+  CRITICAL: "Critica",
+};
+
 type KanbanTask = {
   id: string;
   title: string;
   description: string | null;
   status: KanbanStatus;
+  priority: Priority | null;
   project_id: string;
   assigned_to: string | null;
   due_date: string | null;
@@ -104,12 +125,14 @@ type TaskCreateValues = {
   assigned_to?: string;
   project_id?: string;
   due_date?: Dayjs | null;
+  priority?: Priority;
 };
 
 type TaskMutationValues = {
   title: string;
   description: string | null;
   status: KanbanStatus;
+  priority: Priority;
   project_id: string;
   assigned_to: string | null;
   due_date: string | null;
@@ -123,6 +146,7 @@ type TaskEditValues = {
   project_id?: string;
   due_date?: Dayjs | null;
   status: KanbanStatus;
+  priority: Priority;
 };
 
 type NormalizedTaskEditValues = {
@@ -132,6 +156,7 @@ type NormalizedTaskEditValues = {
   project_id: string;
   due_date: string;
   status: KanbanStatus;
+  priority: Priority;
 };
 
 const statusColorMap: Record<KanbanStatus, string> = {
@@ -148,6 +173,51 @@ const statusLabelMap: Record<KanbanStatus, string> = {
   DONE: "Done",
 };
 
+type TaskComment = {
+  id: string;
+  task_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+  author?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    avatar_url: string | null;
+  } | null;
+};
+
+type TaskActivityRecord = {
+  id: string;
+  task_id: string;
+  actor_id: string;
+  event_type: string;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string;
+};
+
+const activityLabel = (
+  event_type: string,
+  old_value: string | null,
+  new_value: string | null,
+): string => {
+  switch (event_type) {
+    case "tarea_creada":
+      return "Tarea creada";
+    case "status_cambiado":
+      return `Status: ${old_value ?? "—"} → ${new_value ?? "—"}`;
+    case "responsable_cambiado":
+      return `Responsable: ${old_value || "ninguno"} → ${new_value || "ninguno"}`;
+    case "prioridad_cambiada":
+      return `Prioridad: ${old_value ?? "—"} → ${new_value ?? "—"}`;
+    case "fecha_limite_cambiada":
+      return `Fecha: ${old_value || "sin fecha"} → ${new_value || "sin fecha"}`;
+    default:
+      return event_type;
+  }
+};
+
 const TaskDrawer = ({
   taskId,
   onClose,
@@ -156,8 +226,35 @@ const TaskDrawer = ({
   onClose: () => void;
 }) => {
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const [commentBody, setCommentBody] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
   const initialValuesRef = useRef<NormalizedTaskEditValues | null>(null);
   const screens = Grid.useBreakpoint();
+
+  const { data: currentUser } = useGetIdentity<AuthUser>();
+
+  const { mutate: createComment } = useCreate<TaskComment>();
+  const { mutate: createActivity } = useCreate<TaskActivityRecord>();
+
+  const { result: commentsResult, query: commentsQuery } = useList<TaskComment>({
+    resource: "task_comments",
+    filters: taskId ? [{ field: "task_id", operator: "eq", value: taskId }] : [],
+    pagination: { mode: "off" },
+    sorters: [{ field: "created_at", order: "asc" }],
+    meta: {
+      select:
+        "id,task_id,author_id,body,created_at,author:profiles!task_comments_author_id_fkey(id,name,email,avatar_url)",
+    },
+    queryOptions: { enabled: Boolean(taskId) },
+  });
+
+  const { result: activityResult, query: activityQuery } = useList<TaskActivityRecord>({
+    resource: "task_activity",
+    filters: taskId ? [{ field: "task_id", operator: "eq", value: taskId }] : [],
+    pagination: { mode: "off" },
+    sorters: [{ field: "created_at", order: "desc" }],
+    queryOptions: { enabled: Boolean(taskId) },
+  });
 
   const { result: taskResult, query: taskQuery } = useOne<KanbanTask>({
     resource: "tasks",
@@ -196,6 +293,7 @@ const TaskDrawer = ({
     project_id: values?.project_id ?? "",
     due_date: values?.due_date ? values.due_date.format("YYYY-MM-DD") : "",
     status: values?.status ?? "TODO",
+    priority: values?.priority ?? "MEDIUM",
   });
 
   const requestClose = () => {
@@ -264,6 +362,7 @@ const TaskDrawer = ({
       project_id: taskResult.project_id,
       due_date: taskResult.due_date ? dayjs(taskResult.due_date) : null,
       status: taskResult.status,
+      priority: (taskResult.priority as Priority) ?? "MEDIUM",
     };
 
     initialValuesRef.current = normalizeTaskEditValues(initialValues);
@@ -285,11 +384,75 @@ const TaskDrawer = ({
       project_id: values.project_id || null,
       due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
       status: values.status,
+      priority: values.priority ?? "MEDIUM",
       updated_at: new Date().toISOString(),
     };
 
     try {
       await onFinish(payload);
+
+      const old = initialValuesRef.current;
+      const actorId = currentUser?.id;
+      if (old && actorId && taskId) {
+        const getProfileName = (id: string): string => {
+          if (!id) return "ninguno";
+          const p = (profilesResult.data ?? []).find((x) => x.id === id);
+          return p?.name || p?.email || id;
+        };
+
+        if (old.status !== values.status) {
+          createActivity({
+            resource: "task_activity",
+            values: {
+              task_id: taskId,
+              actor_id: actorId,
+              event_type: "status_cambiado",
+              old_value: old.status,
+              new_value: values.status,
+            },
+          });
+        }
+        const newAssigned = values.assigned_to || "";
+        if (old.assigned_to !== newAssigned) {
+          createActivity({
+            resource: "task_activity",
+            values: {
+              task_id: taskId,
+              actor_id: actorId,
+              event_type: "responsable_cambiado",
+              old_value: getProfileName(old.assigned_to),
+              new_value: getProfileName(newAssigned),
+            },
+          });
+        }
+        const newPriority = values.priority ?? "MEDIUM";
+        if (old.priority !== newPriority) {
+          createActivity({
+            resource: "task_activity",
+            values: {
+              task_id: taskId,
+              actor_id: actorId,
+              event_type: "prioridad_cambiada",
+              old_value: priorityLabelMap[old.priority as Priority] ?? old.priority,
+              new_value: priorityLabelMap[newPriority as Priority] ?? newPriority,
+            },
+          });
+        }
+        const newDue = values.due_date?.format("YYYY-MM-DD") ?? "";
+        if (old.due_date !== newDue) {
+          createActivity({
+            resource: "task_activity",
+            values: {
+              task_id: taskId,
+              actor_id: actorId,
+              event_type: "fecha_limite_cambiada",
+              old_value: old.due_date || null,
+              new_value: newDue || null,
+            },
+          });
+        }
+      }
+
       message.success("Tarea actualizada correctamente.");
       onClose();
     } catch (error) {
@@ -381,7 +544,139 @@ const TaskDrawer = ({
                 }))}
               />
             </Form.Item>
+
+            <Form.Item
+              label="Prioridad"
+              name="priority"
+              rules={[{ required: true, message: "Selecciona una prioridad" }]}
+            >
+              <Select
+                options={PRIORITY_LEVELS.map((p) => ({
+                  label: priorityLabelMap[p],
+                  value: p,
+                }))}
+              />
+            </Form.Item>
           </Form>
+
+          <Divider style={{ margin: "20px 0 12px" }} />
+
+          <Tabs
+            size="small"
+            items={[
+              {
+                key: "comments",
+                label: "Comentarios",
+                children: (
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    <Space.Compact style={{ width: "100%" }}>
+                      <Input.TextArea
+                        autoSize={{ minRows: 2, maxRows: 4 }}
+                        placeholder="Agrega un comentario..."
+                        value={commentBody}
+                        onChange={(e) => setCommentBody(e.target.value)}
+                        style={{ resize: "none" }}
+                      />
+                    </Space.Compact>
+                    <Button
+                      disabled={!commentBody.trim()}
+                      loading={submittingComment}
+                      size="small"
+                      type="primary"
+                      onClick={() => {
+                        if (!commentBody.trim() || !taskId || !currentUser?.id) return;
+                        setSubmittingComment(true);
+                        createComment(
+                          {
+                            resource: "task_comments",
+                            values: {
+                              task_id: taskId,
+                              author_id: currentUser.id,
+                              body: commentBody.trim(),
+                            },
+                          },
+                          {
+                            onSuccess: () => {
+                              setCommentBody("");
+                              setSubmittingComment(false);
+                            },
+                            onError: () => setSubmittingComment(false),
+                          },
+                        );
+                      }}
+                    >
+                      Comentar
+                    </Button>
+
+                    {commentsQuery.isLoading ? (
+                      <Spin size="small" />
+                    ) : (commentsResult.data ?? []).length === 0 ? (
+                      <Empty
+                        description="Sin comentarios aun."
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      />
+                    ) : (
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        {(commentsResult.data ?? []).map((c) => {
+                          const author =
+                            (c as any).author?.name ||
+                            (c as any).author?.email ||
+                            "Usuario";
+                          return (
+                            <Space key={c.id} align="start" size={10}>
+                              <Avatar size={28} src={(c as any).author?.avatar_url ?? undefined}>
+                                {author.slice(0, 1).toUpperCase()}
+                              </Avatar>
+                              <Space direction="vertical" size={2}>
+                                <Space size={8}>
+                                  <Typography.Text strong style={{ fontSize: 13 }}>
+                                    {author}
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                    {dayjs(c.created_at).format("DD/MM/YYYY HH:mm")}
+                                  </Typography.Text>
+                                </Space>
+                                <Typography.Text style={{ fontSize: 13 }}>
+                                  {c.body}
+                                </Typography.Text>
+                              </Space>
+                            </Space>
+                          );
+                        })}
+                      </Space>
+                    )}
+                  </Space>
+                ),
+              },
+              {
+                key: "activity",
+                label: "Actividad",
+                children: activityQuery.isLoading ? (
+                  <Spin size="small" />
+                ) : (activityResult.data ?? []).length === 0 ? (
+                  <Empty
+                    description="Sin actividad registrada."
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  />
+                ) : (
+                  <Timeline
+                    items={(activityResult.data ?? []).map((a) => ({
+                      children: (
+                        <Space direction="vertical" size={1}>
+                          <Typography.Text style={{ fontSize: 13 }}>
+                            {activityLabel(a.event_type, a.old_value, a.new_value)}
+                          </Typography.Text>
+                          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                            {dayjs(a.created_at).format("DD/MM/YYYY HH:mm")}
+                          </Typography.Text>
+                        </Space>
+                      ),
+                    }))}
+                  />
+                ),
+              },
+            ]}
+          />
         </Spin>
       </Drawer>
 
@@ -464,6 +759,11 @@ const KanbanCard = ({
             {task.title}
           </Typography.Text>
           <Space size={8} wrap>
+            {task.priority && (
+              <Tag color={priorityColorMap[task.priority as Priority]}>
+                {priorityLabelMap[task.priority as Priority]}
+              </Tag>
+            )}
             <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
             <Button
               {...attributes}
@@ -532,7 +832,14 @@ const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
           <Typography.Text strong style={{ display: "block" }}>
             {task.title}
           </Typography.Text>
-          <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
+          <Space size={8} wrap>
+            {task.priority && (
+              <Tag color={priorityColorMap[task.priority as Priority]}>
+                {priorityLabelMap[task.priority as Priority]}
+              </Tag>
+            )}
+            <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
+          </Space>
         </Space>
 
         <Typography.Text type="secondary">
@@ -645,6 +952,9 @@ export const Kanban = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<
+    "vencidas" | "sin-asignar" | "esta-semana" | "por-revisar" | null
+  >(null);
   const [taskForm] = Form.useForm<TaskCreateValues>();
 
   const { mutate: updateTask, mutation: updateMutation } = useUpdate<
@@ -659,6 +969,8 @@ export const Kanban = () => {
     TaskMutationValues
   >();
 
+  const { mutate: logActivity } = useCreate<TaskActivityRecord>();
+
   const { result: tasksResult, query: tasksQuery } = useList<KanbanTask>({
     resource: "tasks",
     filters: selectedProjectId
@@ -667,10 +979,11 @@ export const Kanban = () => {
     pagination: {
       mode: "off",
     },
+    liveMode: "auto",
     sorters: [{ field: "created_at", order: "desc" }],
     meta: {
       select:
-        "id,title,description,status,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),projects(name)",
+        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),projects(name)",
     },
   });
 
@@ -694,15 +1007,56 @@ export const Kanban = () => {
   const profiles = profilesResult.data ?? [];
   const projects = projectsResult.data ?? [];
 
+  const quickFilterCounts = useMemo(() => {
+    const today = dayjs().startOf("day");
+    const weekEnd = today.add(7, "day");
+    return {
+      vencidas: tasks.filter(
+        (t) => t.due_date && dayjs(t.due_date).isBefore(today) && t.status !== "DONE",
+      ).length,
+      "sin-asignar": tasks.filter((t) => !t.assigned_to).length,
+      "esta-semana": tasks.filter((t) => {
+        if (!t.due_date || t.status === "DONE") return false;
+        const d = dayjs(t.due_date);
+        return (d.isSame(today) || d.isAfter(today)) && d.isBefore(weekEnd);
+      }).length,
+      "por-revisar": tasks.filter((t) => t.status === "IN_REVIEW").length,
+    };
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (!activeQuickFilter) return tasks;
+    const today = dayjs().startOf("day");
+    const weekEnd = today.add(7, "day");
+    switch (activeQuickFilter) {
+      case "vencidas":
+        return tasks.filter(
+          (t) => t.due_date && dayjs(t.due_date).isBefore(today) && t.status !== "DONE",
+        );
+      case "sin-asignar":
+        return tasks.filter((t) => !t.assigned_to);
+      case "esta-semana":
+        return tasks.filter((t) => {
+          if (!t.due_date || t.status === "DONE") return false;
+          const d = dayjs(t.due_date);
+          return (d.isSame(today) || d.isAfter(today)) && d.isBefore(weekEnd);
+        });
+      case "por-revisar":
+        return tasks.filter((t) => t.status === "IN_REVIEW");
+      default:
+        return tasks;
+    }
+  }, [tasks, activeQuickFilter]);
+
   const tasksByStatus = useMemo(() => {
     return KANBAN_STATUSES.reduce(
       (acc, status) => {
-        acc[status] = tasks.filter((task) => task.status === status);
+        acc[status] = filteredTasks.filter((task) => task.status === status);
         return acc;
       },
       {} as Record<KanbanStatus, KanbanTask[]>,
     );
-  }, [tasks]);
+  }, [filteredTasks]);
 
   const profileOptions = profiles.map((profile) => ({
     label: profile.name || profile.email || profile.id,
@@ -819,6 +1173,7 @@ export const Kanban = () => {
             title: values.title.trim(),
             description: values.description?.trim() || null,
             status: selectedStatus,
+            priority: values.priority ?? "MEDIUM",
             project_id: values.project_id as string,
             assigned_to: values.assigned_to || null,
             due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
@@ -826,7 +1181,20 @@ export const Kanban = () => {
           },
         },
         {
-          onSuccess: () => {
+          onSuccess: (data) => {
+            const newTaskId = data.data?.id as string | undefined;
+            if (newTaskId && currentUser?.id) {
+              logActivity({
+                resource: "task_activity",
+                values: {
+                  task_id: newTaskId,
+                  actor_id: currentUser.id,
+                  event_type: "tarea_creada",
+                  old_value: null,
+                  new_value: null,
+                },
+              });
+            }
             message.success("Tarea creada correctamente.");
             closeCreateModal();
           },
@@ -930,19 +1298,73 @@ export const Kanban = () => {
         </div>
 
         <Card className="glass-card" size="small">
-          <Space direction="vertical" size={8} style={{ width: "100%" }}>
-            <Typography.Text strong>Proyecto del tablero</Typography.Text>
-            <Select
-              allowClear
-              options={projectOptions}
-              placeholder="Todos los proyectos"
-              style={{ maxWidth: 320, width: "100%" }}
-              value={selectedProjectId}
-              onChange={(value) => setSelectedProjectId(value)}
-            />
-            <Typography.Text type="secondary">
-              Filtra el Kanban para ver un proyecto especifico o deja el selector vacio para ver todas las tareas.
-            </Typography.Text>
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            <Space wrap size={[12, 8]} align="center">
+              <div>
+                <Typography.Text strong>Proyecto</Typography.Text>
+                <div style={{ marginTop: 4 }}>
+                  <Select
+                    allowClear
+                    options={projectOptions}
+                    placeholder="Todos los proyectos"
+                    style={{ minWidth: 220, width: "100%" }}
+                    value={selectedProjectId}
+                    onChange={(value) => setSelectedProjectId(value)}
+                  />
+                </div>
+              </div>
+              <div>
+                <Typography.Text strong>Filtros rapidos</Typography.Text>
+                <div style={{ marginTop: 4 }}>
+                  <Space wrap size={[8, 8]}>
+                    {(
+                      [
+                        { key: "vencidas", label: "Vencidas" },
+                        { key: "sin-asignar", label: "Sin asignar" },
+                        { key: "esta-semana", label: "Esta semana" },
+                        { key: "por-revisar", label: "Por revisar" },
+                      ] as const
+                    ).map(({ key, label }) => {
+                      const count = quickFilterCounts[key];
+                      const isActive = activeQuickFilter === key;
+                      return (
+                        <Tag.CheckableTag
+                          key={key}
+                          checked={isActive}
+                          onChange={(checked) =>
+                            setActiveQuickFilter(checked ? key : null)
+                          }
+                          style={{
+                            borderRadius: 20,
+                            padding: "2px 10px",
+                            cursor: "pointer",
+                            border: "1px solid",
+                            borderColor: isActive ? "#1677ff" : "#d9d9d9",
+                          }}
+                        >
+                          {label}
+                          {count > 0 && (
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                background: isActive ? "#fff" : "#1677ff",
+                                color: isActive ? "#1677ff" : "#fff",
+                                borderRadius: 10,
+                                padding: "0 6px",
+                                fontSize: 11,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {count}
+                            </span>
+                          )}
+                        </Tag.CheckableTag>
+                      );
+                    })}
+                  </Space>
+                </div>
+              </div>
+            </Space>
           </Space>
         </Card>
 
@@ -1021,6 +1443,19 @@ export const Kanban = () => {
 
           <Form.Item label="Fecha limite" name="due_date">
             <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} />
+          </Form.Item>
+
+          <Form.Item
+            label="Prioridad"
+            name="priority"
+            initialValue="MEDIUM"
+          >
+            <Select
+              options={PRIORITY_LEVELS.map((p) => ({
+                label: priorityLabelMap[p],
+                value: p,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

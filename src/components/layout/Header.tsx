@@ -3,6 +3,7 @@ import { Grid, Layout, Space, Typography, theme } from "antd";
 import { useLocation } from "react-router";
 
 import CurrentUser from "./CurrentUser";
+import NotificationBell from "./NotificationBell";
 
 const getHeaderCopy = (pathname: string) => {
   if (pathname.startsWith("/projects")) {
@@ -16,6 +17,20 @@ const getHeaderCopy = (pathname: string) => {
     return {
       title: "Tablero de tareas",
       subtitle: "Prioridades activas, avance del equipo y flujo diario",
+    };
+  }
+
+  if (pathname.startsWith("/operations")) {
+    return {
+      title: "Operacion visible",
+      subtitle: "Resumen semanal por proyecto y carga por responsable",
+    };
+  }
+
+  if (pathname.startsWith("/kpis")) {
+    return {
+      title: "KPIs del equipo",
+      subtitle: "Completadas, atrasos y proyectos en riesgo por periodo",
     };
   }
 
@@ -93,7 +108,10 @@ const Header = () => {
           </Typography.Text>
         </div>
       </Space>
-      <CurrentUser />
+      <Space size={8}>
+        <NotificationBell />
+        <CurrentUser />
+      </Space>
     </Layout.Header>
   );
 };

@@ -62,11 +62,9 @@ Agregar visibilidad financiera minima sin convertir el producto en un ERP.
 ## Dependencias tecnicas
 
 - nuevas columnas en `projects`;
-- decision de formato monetario;
-- posible control de visibilidad si la informacion es sensible.
+- decision de formato monetario.
 
 ## Riesgos
 
 - puede introducir complejidad de negocio prematura;
-- si el costo no se actualiza con disciplina, pierde valor;
-- requiere decision clara sobre quien puede editar o ver estos datos.
+- si el costo no se actualiza con disciplina, pierde valor.

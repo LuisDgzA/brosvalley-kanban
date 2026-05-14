@@ -38,13 +38,6 @@ Dar una lectura operativa simple para direccion y operaciones sin obligar a nave
 - distribucion automatica de tareas;
 - reportes exportables avanzados.
 
-## Usuarios
-
-- direccion;
-- operaciones;
-- lideres de proyecto;
-- responsables individuales.
-
 ## 1. Resumen semanal por proyecto
 
 ### Objetivo

@@ -21,7 +21,9 @@ import {
   ForgotPassword,
   Home,
   Kanban,
+  Kpis,
   Login,
+  Operations,
   ProjectsCreate,
   ProjectsEdit,
   ProjectsList,
@@ -70,10 +72,30 @@ function App() {
                     list: "/kanban",
                   },
                   {
+                    name: "operations",
+                    list: "/operations",
+                    meta: {
+                      label: "Operacion visible",
+                    },
+                  },
+                  {
+                    name: "kpis",
+                    list: "/kpis",
+                    meta: {
+                      label: "KPIs",
+                    },
+                  },
+                  {
                     name: "profiles",
                   },
                   {
                     name: "project_members",
+                  },
+                  {
+                    name: "task_comments",
+                  },
+                  {
+                    name: "task_activity",
                   },
                 ]}
               >
@@ -112,6 +134,8 @@ function App() {
                     <Route path="/projects/edit/:id" element={<ProjectsEdit />} />
                     <Route path="/projects/show/:id" element={<ProjectsShow />} />
                     <Route path="/kanban" element={<Kanban />} />
+                    <Route path="/operations" element={<Operations />} />
+                    <Route path="/kpis" element={<Kpis />} />
                   </Route>
 
                   <Route path="*" element={<CatchAllNavigate to="/" />} />

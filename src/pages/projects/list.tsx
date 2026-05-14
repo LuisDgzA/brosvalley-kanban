@@ -30,6 +30,7 @@ export const ProjectsList = () => {
   const screens = Grid.useBreakpoint();
   const { tableProps } = useTable<ProjectRecord>({
     resource: "projects",
+    liveMode: "auto",
     meta: {
       select:
         "*, project_members(id,user_id,profiles(id,name,email,avatar_url))",
