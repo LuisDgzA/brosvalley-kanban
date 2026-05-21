@@ -25,6 +25,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import type { AuthUser } from "@/providers/auth";
+import { useProjectAccess } from "@/hooks/useProjectAccess";
 
 import { Create } from "@refinedev/antd";
 
@@ -69,6 +70,7 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
   const screens = Grid.useBreakpoint();
   const { list, show } = useNavigation();
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const { canManageProject, isLoading: permissionsLoading } = useProjectAccess();
   const [isSyncingMembers, setIsSyncingMembers] = useState(false);
 
   const { result: projectResult, query: projectQuery } = useOne<ProjectRecord>({
@@ -112,8 +114,12 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
       pagination: {
         mode: "off",
       },
+      sorters: [{ field: "user_id", order: "asc" }],
+      meta: {
+        select: "id,project_id,user_id,role",
+      },
       queryOptions: {
-        enabled: isEdit && !!projectId,
+        enabled: isEdit && !!projectId && !permissionsLoading,
       },
     });
 
@@ -175,6 +181,7 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
         savedProjectId,
         values.member_ids ?? [],
         existingMembers,
+        currentUser?.id,
       );
 
       message.success(
@@ -196,7 +203,7 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
   return (
     <PageWrapper
       action={action}
-      isLoading={formLoading || projectQuery.isLoading}
+      isLoading={formLoading || projectQuery.isLoading || permissionsLoading}
       saveButtonProps={{
         ...saveButtonProps,
         loading: Boolean(saveButtonProps.loading) || isSyncingMembers,
@@ -221,6 +228,16 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
         </div>
 
         <Card className="glass-card">
+          {isEdit && projectId && !canManageProject(projectId) ? (
+            <Alert
+              message="Acceso restringido"
+              description="Solo owners o admins pueden editar este proyecto."
+              showIcon
+              style={{ marginBottom: 24 }}
+              type="warning"
+            />
+          ) : null}
+
           <Form<ProjectFormValues>
             {...safeFormProps}
             form={form}
@@ -291,6 +308,7 @@ export const ProjectFormPage = ({ action, projectId }: ProjectFormPageProps) => 
                 </Button>
                 <Button
                   htmlType="submit"
+                  disabled={isEdit && projectId ? !canManageProject(projectId) : false}
                   loading={Boolean(saveButtonProps.loading) || isSyncingMembers}
                   type="primary"
                 >

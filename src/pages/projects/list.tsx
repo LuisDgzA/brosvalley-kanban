@@ -21,6 +21,8 @@ import {
 } from "antd";
 import { Link } from "react-router";
 
+import { useProjectAccess } from "@/hooks/useProjectAccess";
+
 import type { ProjectMemberRecord, ProjectRecord } from "./types";
 
 const getMemberDisplayName = (member: ProjectMemberRecord) =>
@@ -28,15 +30,27 @@ const getMemberDisplayName = (member: ProjectMemberRecord) =>
 
 export const ProjectsList = () => {
   const screens = Grid.useBreakpoint();
+  const {
+    buildProjectAccessFilters,
+    canDeleteProject,
+    canManageProject,
+    isLoading: permissionsLoading,
+  } = useProjectAccess();
   const { tableProps } = useTable<ProjectRecord>({
     resource: "projects",
     liveMode: "auto",
+    filters: {
+      permanent: buildProjectAccessFilters("id"),
+    },
     meta: {
       select:
-        "*, project_members(id,user_id,profiles(id,name,email,avatar_url))",
+        "*, project_members(id,user_id,role,profiles(id,name,email,avatar_url))",
     },
     sorters: {
       initial: [{ field: "created_at", order: "desc" }],
+    },
+    queryOptions: {
+      enabled: !permissionsLoading,
     },
   });
 
@@ -118,10 +132,14 @@ export const ProjectsList = () => {
 
                     <Space style={{ width: "100%" }} wrap>
                       <ShowButton hideText recordItemId={record.id} />
-                      <EditButton hideText recordItemId={record.id} />
-                      <DeleteButton hideText recordItemId={record.id} />
+                      {canManageProject(record.id) ? (
+                        <EditButton hideText recordItemId={record.id} />
+                      ) : null}
+                      {canDeleteProject ? (
+                        <DeleteButton hideText recordItemId={record.id} />
+                      ) : null}
                       <Button block={!screens.sm} type="default">
-                        <Link to="/kanban">Ver tablero</Link>
+                        <Link to={`/kanban?projectId=${record.id}`}>Ver tablero</Link>
                       </Button>
                     </Space>
                   </Space>

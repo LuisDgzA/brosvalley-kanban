@@ -87,8 +87,11 @@ const NotificationBell = () => {
     setDismissed(new Set(allNotifications.map((n) => n.key)));
   };
 
-  const handleItemClick = () => {
-    navigate("/kanban");
+  const handleItemClick = (item: NotificationItem) => {
+    const params = new URLSearchParams();
+    params.set("projectId", item.task.project_id);
+    params.set("taskId", item.task.id);
+    navigate(`/kanban?${params.toString()}`);
   };
 
   const content = (
@@ -119,7 +122,7 @@ const NotificationBell = () => {
                 alignItems: "flex-start",
                 cursor: "pointer",
               }}
-              onClick={handleItemClick}
+              onClick={() => handleItemClick(item)}
               actions={[
                 <Button
                   key="dismiss"

@@ -24,16 +24,6 @@ import type { ReactNode } from "react";
 
 import type { ProjectRecord, TaskRecord } from "../projects/types";
 
-type TaskActivityRecord = {
-  id: string;
-  task_id: string;
-  actor_id: string;
-  event_type: string;
-  old_value: string | null;
-  new_value: string | null;
-  created_at: string;
-};
-
 type DelayedProject = {
   project: ProjectRecord;
   overdue: number;
@@ -122,34 +112,20 @@ export const Kpis = () => {
     },
   });
 
-  const { result: activityResult, query: activityQuery } = useList<TaskActivityRecord>({
-    resource: "task_activity",
-    filters: [
-      { field: "event_type", operator: "eq", value: "status_changed" },
-      { field: "new_value", operator: "eq", value: "DONE" },
-      { field: "created_at", operator: "gte", value: periodStart.toISOString() },
-    ],
-    pagination: { mode: "off" },
-  });
-
   const projects = projectsResult.data ?? [];
   const tasks = tasksResult.data ?? [];
-  const activityCompletions = activityResult.data ?? [];
 
-  const isLoading =
-    projectsQuery.isLoading || tasksQuery.isLoading || activityQuery.isLoading;
+  const isLoading = projectsQuery.isLoading || tasksQuery.isLoading;
 
   const stats = useMemo(() => {
     const today = dayjs().startOf("day");
     const threshold48h = dayjs().add(48, "hour");
 
-    const completedViaTrigger = tasks.filter(
+    const completedInPeriod = tasks.filter(
       (t) =>
         t.completed_at &&
         dayjs(t.completed_at).isAfter(periodStart),
     ).length;
-
-    const completedInPeriod = Math.max(completedViaTrigger, activityCompletions.length);
 
     const overdue = tasks.filter(
       (t) =>
@@ -165,7 +141,7 @@ export const Kpis = () => {
     }).length;
 
     return { completedInPeriod, overdue, dueSoon };
-  }, [tasks, activityCompletions, periodStart]);
+  }, [tasks, periodStart]);
 
   const delayedProjects = useMemo<DelayedProject[]>(() => {
     const today = dayjs().startOf("day");

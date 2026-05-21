@@ -8,6 +8,16 @@ export type AuthUser = {
   name: string | null;
   avatar_url: string | null;
   job_title: string | null;
+  global_role: GlobalRole;
+};
+
+export type GlobalRole = "admin" | "member";
+export type ProjectMemberRole = "owner" | "collaborator";
+
+export type AppPermissions = {
+  globalRole: GlobalRole;
+  projectIds: string[];
+  projectRoles: Record<string, ProjectMemberRole>;
 };
 
 export const authProvider: AuthProvider = {
@@ -154,7 +164,7 @@ export const authProvider: AuthProvider = {
 
     const { data: profile } = await supabaseClient
       .from("profiles")
-      .select("id, name, avatar_url, job_title, email")
+      .select("id, name, avatar_url, job_title, email, global_role")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -169,7 +179,60 @@ export const authProvider: AuthProvider = {
         null,
       avatar_url: profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
       job_title: profile?.job_title ?? null,
+      global_role: (profile?.global_role as GlobalRole | undefined) ?? "member",
     } satisfies AuthUser;
   },
-  getPermissions: async () => null,
+  getPermissions: async () => {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseClient.auth.getUser();
+
+    if (userError || !user) {
+      return null;
+    }
+
+    const { data: profile, error: profileError } = await supabaseClient
+      .from("profiles")
+      .select("global_role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const globalRole =
+      !profileError && (profile?.global_role === "admin" || profile?.global_role === "member")
+        ? (profile.global_role as GlobalRole)
+        : "member";
+
+    const { data: memberships, error: membershipsError } = await supabaseClient
+      .from("project_members")
+      .select("project_id, role")
+      .eq("user_id", user.id);
+
+    if (membershipsError) {
+      return {
+        globalRole,
+        projectIds: [],
+        projectRoles: {},
+      } satisfies AppPermissions;
+    }
+
+    const projectIds: string[] = [];
+    const projectRoles: Record<string, ProjectMemberRole> = {};
+
+    for (const membership of memberships ?? []) {
+      if (!membership.project_id) {
+        continue;
+      }
+
+      projectIds.push(membership.project_id);
+      projectRoles[membership.project_id] =
+        membership.role === "owner" ? "owner" : "collaborator";
+    }
+
+    return {
+      globalRole,
+      projectIds,
+      projectRoles,
+    } satisfies AppPermissions;
+  },
 };

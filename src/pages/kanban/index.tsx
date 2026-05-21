@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { DateField, useForm } from "@refinedev/antd";
 import {
+  type CrudFilters,
   type HttpError,
   useCreate,
   useGetIdentity,
@@ -55,8 +56,11 @@ import {
   message,
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 
 import type { AuthUser } from "@/providers/auth";
+import { useProjectAccess } from "@/hooks/useProjectAccess";
+import type { ProjectMemberRecord } from "@/pages/projects/types";
 
 const KANBAN_STATUSES = [
   "TODO",
@@ -117,6 +121,10 @@ type ProfileOption = {
 type ProjectOption = {
   id: string;
   name: string;
+};
+
+type ProjectMemberOption = ProjectMemberRecord & {
+  profiles?: ProfileOption | null;
 };
 
 type TaskCreateValues = {
@@ -203,20 +211,47 @@ const activityLabel = (
   new_value: string | null,
 ): string => {
   switch (event_type) {
-    case "tarea_creada":
+    case "task_created":
       return "Tarea creada";
-    case "status_cambiado":
+    case "task_status_changed":
       return `Status: ${old_value ?? "—"} → ${new_value ?? "—"}`;
-    case "responsable_cambiado":
+    case "task_assignee_changed":
       return `Responsable: ${old_value || "ninguno"} → ${new_value || "ninguno"}`;
-    case "prioridad_cambiada":
+    case "task_priority_changed":
       return `Prioridad: ${old_value ?? "—"} → ${new_value ?? "—"}`;
-    case "fecha_limite_cambiada":
+    case "task_due_date_changed":
       return `Fecha: ${old_value || "sin fecha"} → ${new_value || "sin fecha"}`;
+    case "task_project_changed":
+      return `Proyecto: ${old_value || "sin proyecto"} → ${new_value || "sin proyecto"}`;
+    case "task_comment_added":
+      return "Comentario agregado";
     default:
       return event_type;
   }
 };
+
+const buildProjectScopedFilters = (
+  baseFilters: CrudFilters,
+  projectId?: string,
+): CrudFilters => {
+  if (!projectId) {
+    return baseFilters;
+  }
+
+  return [
+    ...baseFilters,
+    { field: "project_id", operator: "eq", value: projectId },
+  ];
+};
+
+const mapMemberOptions = (members: ProjectMemberOption[]) =>
+  members.map((member) => ({
+    label:
+      member.profiles?.name ||
+      member.profiles?.email ||
+      member.user_id,
+    value: member.user_id,
+  }));
 
 const TaskDrawer = ({
   taskId,
@@ -232,9 +267,9 @@ const TaskDrawer = ({
   const screens = Grid.useBreakpoint();
 
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const { buildProjectAccessFilters, isLoading: permissionsLoading } = useProjectAccess();
 
   const { mutate: createComment } = useCreate<TaskComment>();
-  const { mutate: createActivity } = useCreate<TaskActivityRecord>();
 
   const { result: commentsResult, query: commentsQuery } = useList<TaskComment>({
     resource: "task_comments",
@@ -261,10 +296,10 @@ const TaskDrawer = ({
     id: taskId ?? "",
     meta: {
       select:
-        "id,title,description,status,project_id,assigned_to,due_date,created_by,created_at,updated_at",
+        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at",
     },
     queryOptions: {
-      enabled: Boolean(taskId),
+      enabled: Boolean(taskId) && !permissionsLoading,
     },
   });
 
@@ -283,6 +318,7 @@ const TaskDrawer = ({
     ...formProps,
     initialValues: undefined,
   };
+  const watchedProjectId = Form.useWatch("project_id", form);
 
   const normalizeTaskEditValues = (
     values: Partial<TaskEditValues> | null | undefined,
@@ -318,32 +354,34 @@ const TaskDrawer = ({
     onClose();
   };
 
-  const { result: profilesResult, query: profilesQuery } = useList<ProfileOption>({
-    resource: "profiles",
+  const { result: projectMembersResult, query: projectMembersQuery } = useList<ProjectMemberOption>({
+    resource: "project_members",
+    filters: buildProjectScopedFilters([], watchedProjectId),
     pagination: {
       mode: "off",
     },
-    sorters: [{ field: "name", order: "asc" }],
+    meta: {
+      select:
+        "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
+    },
     queryOptions: {
-      enabled: Boolean(taskId),
+      enabled: Boolean(taskId && watchedProjectId) && !permissionsLoading,
     },
   });
 
   const { result: projectsResult, query: projectsQuery } = useList<ProjectOption>({
     resource: "projects",
+    filters: buildProjectAccessFilters("id"),
     pagination: {
       mode: "off",
     },
     sorters: [{ field: "name", order: "asc" }],
     queryOptions: {
-      enabled: Boolean(taskId),
+      enabled: Boolean(taskId) && !permissionsLoading,
     },
   });
 
-  const profileOptions = (profilesResult.data ?? []).map((profile) => ({
-    label: profile.name || profile.email || profile.id,
-    value: profile.id,
-  }));
+  const profileOptions = mapMemberOptions(projectMembersResult.data ?? []);
 
   const projectOptions = (projectsResult.data ?? []).map((project) => ({
     label: project.name,
@@ -376,6 +414,18 @@ const TaskDrawer = ({
     }
   }, [taskId]);
 
+  useEffect(() => {
+    const selectedAssignee = form.getFieldValue("assigned_to") as string | undefined;
+    if (!selectedAssignee) {
+      return;
+    }
+
+    const allowedAssignees = new Set(profileOptions.map((option) => option.value));
+    if (!allowedAssignees.has(selectedAssignee)) {
+      form.setFieldValue("assigned_to", undefined);
+    }
+  }, [form, profileOptions]);
+
   const handleSubmit = async (values: TaskEditValues) => {
     const payload = {
       title: values.title.trim(),
@@ -390,68 +440,6 @@ const TaskDrawer = ({
 
     try {
       await onFinish(payload);
-
-      const old = initialValuesRef.current;
-      const actorId = currentUser?.id;
-      if (old && actorId && taskId) {
-        const getProfileName = (id: string): string => {
-          if (!id) return "ninguno";
-          const p = (profilesResult.data ?? []).find((x) => x.id === id);
-          return p?.name || p?.email || id;
-        };
-
-        if (old.status !== values.status) {
-          createActivity({
-            resource: "task_activity",
-            values: {
-              task_id: taskId,
-              actor_id: actorId,
-              event_type: "status_cambiado",
-              old_value: old.status,
-              new_value: values.status,
-            },
-          });
-        }
-        const newAssigned = values.assigned_to || "";
-        if (old.assigned_to !== newAssigned) {
-          createActivity({
-            resource: "task_activity",
-            values: {
-              task_id: taskId,
-              actor_id: actorId,
-              event_type: "responsable_cambiado",
-              old_value: getProfileName(old.assigned_to),
-              new_value: getProfileName(newAssigned),
-            },
-          });
-        }
-        const newPriority = values.priority ?? "MEDIUM";
-        if (old.priority !== newPriority) {
-          createActivity({
-            resource: "task_activity",
-            values: {
-              task_id: taskId,
-              actor_id: actorId,
-              event_type: "prioridad_cambiada",
-              old_value: priorityLabelMap[old.priority as Priority] ?? old.priority,
-              new_value: priorityLabelMap[newPriority as Priority] ?? newPriority,
-            },
-          });
-        }
-        const newDue = values.due_date?.format("YYYY-MM-DD") ?? "";
-        if (old.due_date !== newDue) {
-          createActivity({
-            resource: "task_activity",
-            values: {
-              task_id: taskId,
-              actor_id: actorId,
-              event_type: "fecha_limite_cambiada",
-              old_value: old.due_date || null,
-              new_value: newDue || null,
-            },
-          });
-        }
-      }
 
       message.success("Tarea actualizada correctamente.");
       onClose();
@@ -510,9 +498,14 @@ const TaskDrawer = ({
             <Form.Item label="Asignado a" name="assigned_to">
               <Select
                 allowClear
-                loading={profilesQuery.isLoading}
+                disabled={!watchedProjectId}
+                loading={projectMembersQuery.isLoading}
                 options={profileOptions}
-                placeholder="Selecciona un perfil"
+                placeholder={
+                  watchedProjectId
+                    ? "Selecciona un miembro del proyecto"
+                    : "Selecciona primero el proyecto"
+                }
               />
             </Form.Item>
 
@@ -947,15 +940,26 @@ export const Kanban = () => {
   const sensors = useSensors(useSensor(PointerSensor));
   const screens = Grid.useBreakpoint();
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const {
+    buildProjectAccessFilters,
+    canAccessProject,
+    isLoading: permissionsLoading,
+  } = useProjectAccess();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<KanbanStatus>("TODO");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(
+    searchParams.get("projectId") ?? undefined,
+  );
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
+    searchParams.get("taskId"),
+  );
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
   const [activeQuickFilter, setActiveQuickFilter] = useState<
     "vencidas" | "sin-asignar" | "esta-semana" | "por-revisar" | null
   >(null);
   const [taskForm] = Form.useForm<TaskCreateValues>();
+  const watchedCreateProjectId = Form.useWatch("project_id", taskForm);
 
   const { mutate: updateTask, mutation: updateMutation } = useUpdate<
     KanbanTask,
@@ -969,13 +973,12 @@ export const Kanban = () => {
     TaskMutationValues
   >();
 
-  const { mutate: logActivity } = useCreate<TaskActivityRecord>();
-
   const { result: tasksResult, query: tasksQuery } = useList<KanbanTask>({
     resource: "tasks",
-    filters: selectedProjectId
-      ? [{ field: "project_id", operator: "eq", value: selectedProjectId }]
-      : [],
+    filters: buildProjectScopedFilters(
+      buildProjectAccessFilters("project_id"),
+      selectedProjectId,
+    ),
     pagination: {
       mode: "off",
     },
@@ -985,26 +988,40 @@ export const Kanban = () => {
       select:
         "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),projects(name)",
     },
+    queryOptions: {
+      enabled: !permissionsLoading,
+    },
   });
 
-  const { result: profilesResult, query: profilesQuery } = useList<ProfileOption>({
-    resource: "profiles",
-    pagination: {
-      mode: "off",
-    },
-    sorters: [{ field: "name", order: "asc" }],
-  });
+  const { result: projectMembersResult, query: projectMembersQuery } =
+    useList<ProjectMemberOption>({
+      resource: "project_members",
+      filters: buildProjectScopedFilters([], watchedCreateProjectId),
+      pagination: {
+        mode: "off",
+      },
+      meta: {
+        select:
+          "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
+      },
+      queryOptions: {
+        enabled: Boolean(watchedCreateProjectId) && !permissionsLoading,
+      },
+    });
 
   const { result: projectsResult, query: projectsQuery } = useList<ProjectOption>({
     resource: "projects",
+    filters: buildProjectAccessFilters("id"),
     pagination: {
       mode: "off",
     },
     sorters: [{ field: "name", order: "asc" }],
+    queryOptions: {
+      enabled: !permissionsLoading,
+    },
   });
 
   const tasks = tasksResult.data ?? [];
-  const profiles = profilesResult.data ?? [];
   const projects = projectsResult.data ?? [];
 
   const quickFilterCounts = useMemo(() => {
@@ -1058,10 +1075,7 @@ export const Kanban = () => {
     );
   }, [filteredTasks]);
 
-  const profileOptions = profiles.map((profile) => ({
-    label: profile.name || profile.email || profile.id,
-    value: profile.id,
-  }));
+  const profileOptions = mapMemberOptions(projectMembersResult.data ?? []);
 
   const projectOptions = projects.map((project) => ({
     label: project.name,
@@ -1072,6 +1086,45 @@ export const Kanban = () => {
     projects.find((project) => project.id === selectedProjectId)?.name ?? null;
   const unassignedTasks = tasks.filter((task) => !task.assigned_to).length;
   const dueTasks = tasks.filter((task) => task.due_date).length;
+
+  useEffect(() => {
+    const nextProjectId = searchParams.get("projectId") ?? undefined;
+    const nextTaskId = searchParams.get("taskId");
+
+    setSelectedProjectId((current) =>
+      current === nextProjectId ? current : nextProjectId,
+    );
+    setSelectedTaskId((current) => (current === nextTaskId ? current : nextTaskId));
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    if (projects.length > 0 && !canAccessProject(selectedProjectId)) {
+      setSelectedProjectId(undefined);
+      setSelectedTaskId(null);
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete("projectId");
+        next.delete("taskId");
+        return next;
+      });
+    }
+  }, [canAccessProject, projects.length, selectedProjectId, setSearchParams]);
+
+  useEffect(() => {
+    const selectedAssignee = taskForm.getFieldValue("assigned_to") as string | undefined;
+    if (!selectedAssignee) {
+      return;
+    }
+
+    const allowedAssignees = new Set(profileOptions.map((option) => option.value));
+    if (!allowedAssignees.has(selectedAssignee)) {
+      taskForm.setFieldValue("assigned_to", undefined);
+    }
+  }, [profileOptions, taskForm]);
 
   const openCreateModal = (status: KanbanStatus) => {
     setSelectedStatus(status);
@@ -1089,10 +1142,23 @@ export const Kanban = () => {
 
   const openTaskDrawer = (taskId: string) => {
     setSelectedTaskId(taskId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("taskId", taskId);
+      if (selectedProjectId) {
+        next.set("projectId", selectedProjectId);
+      }
+      return next;
+    });
   };
 
   const closeTaskDrawer = () => {
     setSelectedTaskId(null);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("taskId");
+      return next;
+    });
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -1140,6 +1206,12 @@ export const Kanban = () => {
       return;
     }
 
+    if (!canAccessProject(activeData.task.project_id)) {
+      setActiveTask(null);
+      message.error("Solo puedes mover tareas de proyectos donde participas.");
+      return;
+    }
+
     updateTask(
       {
         resource: "tasks",
@@ -1156,7 +1228,9 @@ export const Kanban = () => {
         },
         onError: (error) => {
           setActiveTask(null);
-          message.error(error.message || "No se pudo mover la tarea.");
+          message.error(
+            error.message || "No se pudo mover la tarea en ese proyecto.",
+          );
         },
       },
     );
@@ -1165,6 +1239,11 @@ export const Kanban = () => {
   const handleCreateTask = async () => {
     try {
       const values = await taskForm.validateFields();
+
+      if (!canAccessProject(values.project_id)) {
+        message.error("Solo puedes crear tareas en proyectos donde participas.");
+        return;
+      }
 
       createTask(
         {
@@ -1181,20 +1260,7 @@ export const Kanban = () => {
           },
         },
         {
-          onSuccess: (data) => {
-            const newTaskId = data.data?.id as string | undefined;
-            if (newTaskId && currentUser?.id) {
-              logActivity({
-                resource: "task_activity",
-                values: {
-                  task_id: newTaskId,
-                  actor_id: currentUser.id,
-                  event_type: "tarea_creada",
-                  old_value: null,
-                  new_value: null,
-                },
-              });
-            }
+          onSuccess: () => {
             message.success("Tarea creada correctamente.");
             closeCreateModal();
           },
@@ -1309,7 +1375,19 @@ export const Kanban = () => {
                     placeholder="Todos los proyectos"
                     style={{ minWidth: 220, width: "100%" }}
                     value={selectedProjectId}
-                    onChange={(value) => setSelectedProjectId(value)}
+                    onChange={(value) => {
+                      setSelectedProjectId(value);
+                      setSearchParams((current) => {
+                        const next = new URLSearchParams(current);
+                        if (value) {
+                          next.set("projectId", value);
+                        } else {
+                          next.delete("projectId");
+                          next.delete("taskId");
+                        }
+                        return next;
+                      });
+                    }}
                   />
                 </div>
               </div>
@@ -1368,7 +1446,7 @@ export const Kanban = () => {
           </Space>
         </Card>
 
-        {tasksQuery.isLoading ? (
+        {tasksQuery.isLoading || permissionsLoading ? (
           <Spin />
         ) : (
           <DndContext
@@ -1435,9 +1513,14 @@ export const Kanban = () => {
           <Form.Item label="Asignado a" name="assigned_to">
             <Select
               allowClear
-              loading={profilesQuery.isLoading}
+              disabled={!watchedCreateProjectId}
+              loading={projectMembersQuery.isLoading}
               options={profileOptions}
-              placeholder="Selecciona a un colaborador"
+              placeholder={
+                watchedCreateProjectId
+                  ? "Selecciona a un miembro del proyecto"
+                  : "Selecciona primero el proyecto"
+              }
             />
           </Form.Item>
 

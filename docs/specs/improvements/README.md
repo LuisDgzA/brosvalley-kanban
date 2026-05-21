@@ -22,16 +22,18 @@ Regla de esta carpeta:
 - `05-notificaciones-y-kpis.md`
 - `06-finanzas-ligeras.md`
 - `07-evolucion-de-datos.md`
+- `08-control-de-acceso-y-hardening-operativo.md`
 
 ## Orden sugerido
 
 1. `07-evolucion-de-datos.md`
-2. `01-operacion-visible.md`
-3. `02-prioridad-y-filtros.md`
-4. `03-colaboracion-y-trazabilidad.md`
-5. `05-notificaciones-y-kpis.md`
-6. `04-plantillas-y-etiquetas.md`
-7. `06-finanzas-ligeras.md`
+2. `08-control-de-acceso-y-hardening-operativo.md`
+3. `01-operacion-visible.md`
+4. `02-prioridad-y-filtros.md`
+5. `03-colaboracion-y-trazabilidad.md`
+6. `05-notificaciones-y-kpis.md`
+7. `04-plantillas-y-etiquetas.md`
+8. `06-finanzas-ligeras.md`
 
 ## Criterio de uso
 

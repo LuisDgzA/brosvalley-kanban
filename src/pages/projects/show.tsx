@@ -16,6 +16,8 @@ import {
 } from "antd";
 import { useParams } from "react-router";
 
+import { useProjectAccess } from "@/hooks/useProjectAccess";
+
 import type { ProjectMemberRecord, ProjectRecord, TaskRecord } from "./types";
 
 const statusColorMap: Record<string, string> = {
@@ -28,6 +30,7 @@ const statusColorMap: Record<string, string> = {
 export const ProjectsShow = () => {
   const { id } = useParams();
   const screens = Grid.useBreakpoint();
+  const { canManageProject } = useProjectAccess();
 
   const { result: project, query: projectQuery } = useOne<ProjectRecord>({
     resource: "projects",
@@ -43,7 +46,7 @@ export const ProjectsShow = () => {
       filters: id ? [{ field: "project_id", operator: "eq", value: id }] : [],
       pagination: { mode: "off" },
       meta: {
-        select: "id,project_id,user_id,profiles(id,name,email,avatar_url)",
+        select: "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
       },
       queryOptions: {
         enabled: !!id,
@@ -73,7 +76,7 @@ export const ProjectsShow = () => {
       headerButtons={() => (
         <Space>
           <ListButton resource="projects" />
-          {id ? <EditButton recordItemId={id} /> : null}
+          {id && canManageProject(id) ? <EditButton recordItemId={id} /> : null}
         </Space>
       )}
       isLoading={projectLoading}
@@ -165,7 +168,10 @@ export const ProjectsShow = () => {
                           </Avatar>
                           <Typography.Text>{label}</Typography.Text>
                         </div>
-                        <Badge color="#0f766e" text="Activo" />
+                        <Badge
+                          color={member.role === "owner" ? "#1677ff" : "#0f766e"}
+                          text={member.role === "owner" ? "Owner" : "Activo"}
+                        />
                       </div>
                     );
                   })}

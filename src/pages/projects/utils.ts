@@ -34,12 +34,14 @@ export const syncProjectMembers = async (
   projectId: string,
   nextUserIds: string[],
   existingMembers: ProjectMemberRecord[] = [],
+  actorId?: string,
 ) => {
-  const currentIds = new Set(existingMembers.map((member) => member.user_id));
+  const managedMembers = existingMembers.filter((member) => member.role !== "owner");
+  const currentIds = new Set(managedMembers.map((member) => member.user_id));
   const nextIds = new Set(nextUserIds);
 
   const membersToCreate = nextUserIds.filter((userId) => !currentIds.has(userId));
-  const membersToDelete = existingMembers
+  const membersToDelete = managedMembers
     .filter((member) => !nextIds.has(member.user_id))
     .map((member) => member.id);
 
@@ -48,6 +50,8 @@ export const syncProjectMembers = async (
       membersToCreate.map((userId) => ({
         project_id: projectId,
         user_id: userId,
+        role: "collaborator",
+        added_by: actorId ?? null,
       })),
     );
 
