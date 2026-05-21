@@ -1,14 +1,18 @@
+export type ProjectMemberRole = "owner" | "collaborator";
+
 export type ProfileRecord = {
   id: string;
   name: string | null;
   email: string | null;
   avatar_url: string | null;
+  global_role?: "admin" | "member";
 };
 
 export type ProjectMemberRecord = {
   id: string;
   project_id: string;
   user_id: string;
+  role: ProjectMemberRole;
   profiles?: ProfileRecord | null;
 };
 
