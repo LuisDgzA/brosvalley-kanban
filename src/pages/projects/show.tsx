@@ -46,7 +46,8 @@ export const ProjectsShow = () => {
       filters: id ? [{ field: "project_id", operator: "eq", value: id }] : [],
       pagination: { mode: "off" },
       meta: {
-        select: "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
+        select:
+          "id,project_id,user_id,role,profiles:profiles!project_members_user_id_fkey(id,name,email,avatar_url)",
       },
       queryOptions: {
         enabled: !!id,

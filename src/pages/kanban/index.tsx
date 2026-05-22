@@ -362,7 +362,7 @@ const TaskDrawer = ({
     },
     meta: {
       select:
-        "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
+        "id,project_id,user_id,role,profiles:profiles!project_members_user_id_fkey(id,name,email,avatar_url)",
     },
     queryOptions: {
       enabled: Boolean(taskId && watchedProjectId) && !permissionsLoading,
@@ -1002,7 +1002,7 @@ export const Kanban = () => {
       },
       meta: {
         select:
-          "id,project_id,user_id,role,profiles(id,name,email,avatar_url)",
+          "id,project_id,user_id,role,profiles:profiles!project_members_user_id_fkey(id,name,email,avatar_url)",
       },
       queryOptions: {
         enabled: Boolean(watchedCreateProjectId) && !permissionsLoading,

@@ -44,7 +44,7 @@ export const ProjectsList = () => {
     },
     meta: {
       select:
-        "*, project_members(id,user_id,role,profiles(id,name,email,avatar_url))",
+        "*, project_members(id,user_id,role,profiles:profiles!project_members_user_id_fkey(id,name,email,avatar_url))",
     },
     sorters: {
       initial: [{ field: "created_at", order: "desc" }],
