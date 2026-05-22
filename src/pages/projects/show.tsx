@@ -18,6 +18,7 @@ import { useParams } from "react-router";
 
 import { useProjectAccess } from "@/hooks/useProjectAccess";
 
+import { DeleteProjectButton } from "./DeleteProjectButton";
 import type { ProjectMemberRecord, ProjectRecord, TaskRecord } from "./types";
 
 const statusColorMap: Record<string, string> = {
@@ -30,7 +31,7 @@ const statusColorMap: Record<string, string> = {
 export const ProjectsShow = () => {
   const { id } = useParams();
   const screens = Grid.useBreakpoint();
-  const { canManageProject } = useProjectAccess();
+  const { canDeleteProject, canManageProject } = useProjectAccess();
 
   const { result: project, query: projectQuery } = useOne<ProjectRecord>({
     resource: "projects",
@@ -78,6 +79,13 @@ export const ProjectsShow = () => {
         <Space>
           <ListButton resource="projects" />
           {id && canManageProject(id) ? <EditButton recordItemId={id} /> : null}
+          {id && project?.name && canDeleteProject(id) ? (
+            <DeleteProjectButton
+              projectId={id}
+              projectName={project.name}
+              redirectToListOnSuccess
+            />
+          ) : null}
         </Space>
       )}
       isLoading={projectLoading}

@@ -50,6 +50,14 @@ export const useProjectAccess = () => {
     return role === "owner";
   };
 
+  const canDeleteProject = (projectId?: string | null) => {
+    if (!projectId) {
+      return false;
+    }
+
+    return isAdmin || canManageProject(projectId);
+  };
+
   return {
     permissions,
     isLoading,
@@ -60,6 +68,6 @@ export const useProjectAccess = () => {
     buildProjectAccessFilters,
     canAccessProject,
     canManageProject,
-    canDeleteProject: isAdmin,
+    canDeleteProject,
   };
 };
