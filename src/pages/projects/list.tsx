@@ -31,7 +31,6 @@ const getMemberDisplayName = (member: ProjectMemberRecord) =>
 export const ProjectsList = () => {
   const screens = Grid.useBreakpoint();
   const {
-    buildProjectAccessFilters,
     canDeleteProject,
     canManageProject,
     isLoading: permissionsLoading,
@@ -39,9 +38,6 @@ export const ProjectsList = () => {
   const { tableProps } = useTable<ProjectRecord>({
     resource: "projects",
     liveMode: "auto",
-    filters: {
-      permanent: buildProjectAccessFilters("id"),
-    },
     meta: {
       select:
         "*, project_members(id,user_id,role,profiles:profiles!project_members_user_id_fkey(id,name,email,avatar_url))",
@@ -53,6 +49,9 @@ export const ProjectsList = () => {
       enabled: !permissionsLoading,
     },
   });
+
+  const isLoading = permissionsLoading || tableProps.loading;
+  const projects = tableProps.dataSource ?? [];
 
   return (
     <List
@@ -75,15 +74,15 @@ export const ProjectsList = () => {
           </div>
         </div>
 
-        {tableProps.loading ? (
+        {isLoading ? (
           <Card className="glass-card" loading />
-        ) : (tableProps.dataSource?.length ?? 0) === 0 ? (
+        ) : projects.length === 0 ? (
           <Card className="glass-card">
             <Empty description="Todavia no hay proyectos creados." />
           </Card>
         ) : (
           <Row gutter={[18, 18]}>
-            {(tableProps.dataSource ?? []).map((record) => (
+            {projects.map((record) => (
               <Col key={record.id} lg={8} md={12} xs={24}>
                 <Card className="project-card">
                   <Space direction="vertical" size={18} style={{ width: "100%" }}>
