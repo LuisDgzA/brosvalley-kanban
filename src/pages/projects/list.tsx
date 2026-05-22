@@ -1,7 +1,6 @@
 import {
   CreateButton,
   DateField,
-  DeleteButton,
   EditButton,
   List,
   ShowButton,
@@ -23,6 +22,7 @@ import { Link } from "react-router";
 
 import { useProjectAccess } from "@/hooks/useProjectAccess";
 
+import { DeleteProjectButton } from "./DeleteProjectButton";
 import type { ProjectMemberRecord, ProjectRecord } from "./types";
 
 const getMemberDisplayName = (member: ProjectMemberRecord) =>
@@ -134,8 +134,11 @@ export const ProjectsList = () => {
                       {canManageProject(record.id) ? (
                         <EditButton hideText recordItemId={record.id} />
                       ) : null}
-                      {canDeleteProject ? (
-                        <DeleteButton hideText recordItemId={record.id} />
+                      {canDeleteProject(record.id) ? (
+                        <DeleteProjectButton
+                          projectId={record.id}
+                          projectName={record.name}
+                        />
                       ) : null}
                       <Button block={!screens.sm} type="default">
                         <Link to={`/kanban?projectId=${record.id}`}>Ver tablero</Link>

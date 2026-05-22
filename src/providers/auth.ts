@@ -206,7 +206,8 @@ export const authProvider: AuthProvider = {
     const { data: memberships, error: membershipsError } = await supabaseClient
       .from("project_members")
       .select("project_id, role")
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .is("deleted_at", null);
 
     if (membershipsError) {
       return {
