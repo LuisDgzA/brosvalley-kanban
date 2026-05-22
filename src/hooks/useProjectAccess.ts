@@ -1,17 +1,49 @@
-import { type CrudFilters, usePermissions } from "@refinedev/core";
+import { type CrudFilters, useGetIdentity, useList, usePermissions } from "@refinedev/core";
 
+import type { AuthUser } from "@/providers/auth";
 import type { AppPermissions, ProjectMemberRole } from "@/providers/auth";
+import type { ProjectMemberRecord } from "@/pages/projects/types";
 
 const EMPTY_UUID = "00000000-0000-0000-0000-000000000000";
 
 export const useProjectAccess = () => {
   const { data, isLoading } = usePermissions({});
   const permissions = data as AppPermissions | null | undefined;
+  const { data: currentUser, isLoading: identityLoading } = useGetIdentity<AuthUser>();
 
-  const globalRole = permissions?.globalRole ?? "member";
+  const { result: membershipsResult, query: membershipsQuery } = useList<ProjectMemberRecord>({
+    resource: "project_members",
+    filters: currentUser?.id
+      ? [{ field: "user_id", operator: "eq", value: currentUser.id }]
+      : [],
+    pagination: {
+      mode: "off",
+    },
+    liveMode: "auto",
+    meta: {
+      select: "project_id,role",
+    },
+    queryOptions: {
+      enabled: Boolean(currentUser?.id),
+    },
+  });
+
+  const globalRole = currentUser?.global_role ?? permissions?.globalRole ?? "member";
   const isAdmin = globalRole === "admin";
-  const projectIds = permissions?.projectIds ?? [];
-  const projectRoles = permissions?.projectRoles ?? {};
+  const membershipRows = membershipsResult.data ?? [];
+  const projectIds =
+    membershipRows.length > 0
+      ? [...new Set(membershipRows.map((membership) => membership.project_id))]
+      : (permissions?.projectIds ?? []);
+  const projectRoles =
+    membershipRows.length > 0
+      ? (Object.fromEntries(
+          membershipRows.map((membership) => [
+            membership.project_id,
+            membership.role === "owner" ? "owner" : "collaborator",
+          ]),
+        ) as Record<string, ProjectMemberRole>)
+      : (permissions?.projectRoles ?? {});
 
   const buildProjectAccessFilters = (field: string): CrudFilters => {
     if (isAdmin) {
@@ -60,7 +92,7 @@ export const useProjectAccess = () => {
 
   return {
     permissions,
-    isLoading,
+    isLoading: isLoading || identityLoading || membershipsQuery.isLoading,
     globalRole,
     isAdmin,
     projectIds,
