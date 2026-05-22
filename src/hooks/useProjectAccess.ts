@@ -19,12 +19,13 @@ export const useProjectAccess = () => {
     pagination: {
       mode: "off",
     },
-    liveMode: "auto",
     meta: {
       select: "project_id,role",
     },
     queryOptions: {
       enabled: Boolean(currentUser?.id),
+      refetchInterval: 15000,
+      refetchOnWindowFocus: true,
     },
   });
 

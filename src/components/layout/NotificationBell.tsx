@@ -16,7 +16,7 @@ import {
   Typography,
 } from "antd";
 import dayjs from "dayjs";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 
 import type { AuthUser } from "@/providers/auth";
@@ -33,10 +33,14 @@ type NotificationItem = {
 };
 
 const DUE_SOON_HOURS = 48;
+const STORAGE_KEY_PREFIX = "brosvalley-notification-dismissed";
 
 const NotificationBell = () => {
   const { data: currentUser } = useGetIdentity<AuthUser>();
   const navigate = useNavigate();
+  const storageKey = currentUser?.id
+    ? `${STORAGE_KEY_PREFIX}:${currentUser.id}`
+    : STORAGE_KEY_PREFIX;
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   const { result } = useList<TaskWithProject>({
@@ -78,6 +82,41 @@ const NotificationBell = () => {
   }, [result.data]);
 
   const notifications = allNotifications.filter((n) => !dismissed.has(n.key));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentUser?.id) {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        setDismissed(new Set());
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as string[];
+      setDismissed(new Set(parsed));
+    } catch {
+      setDismissed(new Set());
+    }
+  }, [currentUser?.id, storageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentUser?.id) {
+      return;
+    }
+
+    const validKeys = new Set(allNotifications.map((item) => item.key));
+    const nextDismissed = new Set([...dismissed].filter((key) => validKeys.has(key)));
+
+    if (nextDismissed.size !== dismissed.size) {
+      setDismissed(nextDismissed);
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify([...nextDismissed]));
+  }, [allNotifications, currentUser?.id, dismissed, storageKey]);
 
   const dismiss = (key: string) => {
     setDismissed((prev) => new Set(prev).add(key));
