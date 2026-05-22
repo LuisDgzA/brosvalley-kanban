@@ -36,11 +36,17 @@ export const syncProjectMembers = async (
   existingMembers: ProjectMemberRecord[] = [],
   actorId?: string,
 ) => {
+  const sanitizedNextUserIds = [...new Set(nextUserIds.filter(Boolean))];
   const managedMembers = existingMembers.filter((member) => member.role !== "owner");
-  const currentIds = new Set(managedMembers.map((member) => member.user_id));
-  const nextIds = new Set(nextUserIds);
+  const existingIds = new Set(existingMembers.map((member) => member.user_id));
+  const nextIds = new Set(sanitizedNextUserIds);
 
-  const membersToCreate = nextUserIds.filter((userId) => !currentIds.has(userId));
+  // New projects already create the author as owner via DB trigger.
+  if (actorId && existingMembers.length === 0) {
+    nextIds.delete(actorId);
+  }
+
+  const membersToCreate = [...nextIds].filter((userId) => !existingIds.has(userId));
   const membersToDelete = managedMembers
     .filter((member) => !nextIds.has(member.user_id))
     .map((member) => member.id);

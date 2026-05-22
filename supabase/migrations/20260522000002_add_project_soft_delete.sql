@@ -126,7 +126,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  actor_id UUID;
+  current_actor_id UUID;
   current_project public.projects%ROWTYPE;
   deletion_time TIMESTAMPTZ;
 BEGIN
@@ -134,7 +134,7 @@ BEGIN
     RAISE EXCEPTION 'Solo usuarios autenticados pueden eliminar proyectos.';
   END IF;
 
-  actor_id := auth.uid();
+  current_actor_id := auth.uid();
   deletion_time := now();
 
   SELECT *
@@ -148,7 +148,7 @@ BEGIN
     RAISE EXCEPTION 'El proyecto no existe o ya fue eliminado.';
   END IF;
 
-  IF NOT public.is_project_owner(target_project_id, actor_id) THEN
+  IF NOT public.is_project_owner(target_project_id, current_actor_id) THEN
     RAISE EXCEPTION 'No tienes permisos para eliminar este proyecto.';
   END IF;
 
@@ -159,7 +159,7 @@ BEGIN
 
   UPDATE public.task_comments
   SET deleted_at = deletion_time,
-      deleted_by = actor_id
+      deleted_by = current_actor_id
   WHERE deleted_at IS NULL
     AND task_id IN (
       SELECT t.id
@@ -170,7 +170,7 @@ BEGIN
 
   UPDATE public.task_activity
   SET deleted_at = deletion_time,
-      deleted_by = actor_id
+      deleted_by = current_actor_id
   WHERE deleted_at IS NULL
     AND task_id IN (
       SELECT t.id
@@ -181,20 +181,20 @@ BEGIN
 
   UPDATE public.tasks
   SET deleted_at = deletion_time,
-      deleted_by = actor_id,
+      deleted_by = current_actor_id,
       updated_at = deletion_time
   WHERE project_id = target_project_id
     AND deleted_at IS NULL;
 
   UPDATE public.project_members
   SET deleted_at = deletion_time,
-      deleted_by = actor_id
+      deleted_by = current_actor_id
   WHERE project_id = target_project_id
     AND deleted_at IS NULL;
 
   UPDATE public.projects
   SET deleted_at = deletion_time,
-      deleted_by = actor_id
+      deleted_by = current_actor_id
   WHERE id = target_project_id
     AND deleted_at IS NULL;
 END;
@@ -357,7 +357,7 @@ CREATE POLICY task_activity_insert_member_or_admin
   WITH CHECK (
     auth.role() = 'authenticated'
     AND deleted_at IS NULL
-    AND actor_id = auth.uid()
+    AND public.task_activity.actor_id = auth.uid()
     AND public.can_access_task(task_id)
   );
 
