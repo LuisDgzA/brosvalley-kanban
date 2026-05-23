@@ -311,6 +311,7 @@ const TaskDrawer = ({
   onClose: () => void;
 }) => {
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [commentBody, setCommentBody] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const initialValuesRef = useRef<NormalizedTaskEditValues | null>(null);
@@ -385,6 +386,10 @@ const TaskDrawer = ({
   });
 
   const requestClose = () => {
+    if (isSaving) {
+      return;
+    }
+
     const currentValues = normalizeTaskEditValues(
       form.getFieldsValue(true) as Partial<TaskEditValues>,
     );
@@ -485,11 +490,15 @@ const TaskDrawer = ({
 
   useEffect(() => {
     const selectedAssignees = (form.getFieldValue("assignee_ids") as string[] | undefined) ?? [];
-    if (selectedAssignees.length === 0) {
+    if (selectedAssignees.length === 0 || projectMembersQuery.isLoading) {
       return;
     }
 
     const allowedAssignees = new Set(profileOptions.map((option) => option.value));
+    if (allowedAssignees.size === 0) {
+      return;
+    }
+
     const filteredAssignees = selectedAssignees.filter((assigneeId) =>
       allowedAssignees.has(assigneeId),
     );
@@ -497,21 +506,25 @@ const TaskDrawer = ({
     if (filteredAssignees.length !== selectedAssignees.length) {
       form.setFieldValue("assignee_ids", filteredAssignees);
     }
-  }, [form, profileOptions]);
+  }, [form, profileOptions, projectMembersQuery.isLoading]);
 
   useEffect(() => {
     const selectedTags = (form.getFieldValue("tag_ids") as string[] | undefined) ?? [];
-    if (selectedTags.length === 0) {
+    if (selectedTags.length === 0 || projectTagsQuery.isLoading) {
       return;
     }
 
     const allowedTags = new Set((projectTagsResult.data ?? []).map((tag) => tag.id));
+    if (allowedTags.size === 0) {
+      return;
+    }
+
     const filteredTags = selectedTags.filter((tagId) => allowedTags.has(tagId));
 
     if (filteredTags.length !== selectedTags.length) {
       form.setFieldValue("tag_ids", filteredTags);
     }
-  }, [form, projectTagsResult.data]);
+  }, [form, projectTagsQuery.isLoading, projectTagsResult.data]);
 
   const handleSubmit = async (values: TaskEditValues) => {
     const normalizedAssigneeIds = [...new Set(values.assignee_ids ?? [])];
@@ -528,6 +541,8 @@ const TaskDrawer = ({
     };
 
     try {
+      setIsSaving(true);
+
       const { error } = await supabaseClient
         .from("tasks")
         .update(payload)
@@ -556,12 +571,20 @@ const TaskDrawer = ({
         invalidate({ resource: "user_notifications", invalidates: ["list", "many", "detail"] }),
       ]);
 
+      initialValuesRef.current = normalizeTaskEditValues({
+        ...values,
+        assignee_ids: normalizedAssigneeIds,
+        tag_ids: normalizedTagIds,
+      });
+      setIsDiscardModalOpen(false);
       message.success("Tarea actualizada correctamente.");
       onClose();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "No se pudo actualizar la tarea.";
       message.error(errorMessage);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -573,7 +596,7 @@ const TaskDrawer = ({
           <Space wrap>
             <Button onClick={requestClose}>Cancelar</Button>
             <Button
-              loading={formLoading}
+              loading={formLoading || isSaving}
               type="primary"
               onClick={() => form.submit()}
             >
@@ -624,15 +647,25 @@ const TaskDrawer = ({
               />
             </Form.Item>
 
-            <Form.Item label="Tags" name="tag_ids">
+            <Form.Item
+              extra={
+                watchedProjectId && !projectTagsQuery.isLoading && tagOptions.length === 0
+                  ? "No existen tags en este proyecto todavia."
+                  : undefined
+              }
+              label="Tags"
+              name="tag_ids"
+            >
               <Select
-                disabled={!watchedProjectId}
+                disabled={!watchedProjectId || (!projectTagsQuery.isLoading && tagOptions.length === 0)}
                 loading={projectTagsQuery.isLoading}
                 mode="multiple"
                 options={tagOptions}
                 placeholder={
                   watchedProjectId
-                    ? "Selecciona tags del proyecto"
+                    ? tagOptions.length > 0
+                      ? "Selecciona tags del proyecto"
+                      : "No hay tags disponibles"
                     : "Selecciona primero el proyecto"
                 }
               />
