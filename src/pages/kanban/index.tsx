@@ -315,6 +315,7 @@ const TaskDrawer = ({
   const [commentBody, setCommentBody] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const initialValuesRef = useRef<NormalizedTaskEditValues | null>(null);
+  const skipClosePromptRef = useRef(false);
   const screens = Grid.useBreakpoint();
 
   const { data: currentUser } = useGetIdentity<AuthUser>();
@@ -364,6 +365,7 @@ const TaskDrawer = ({
     id: taskId ?? undefined,
     resource: "tasks",
     redirect: false,
+    warnWhenUnsavedChanges: false,
   });
 
   const safeFormProps = {
@@ -386,6 +388,12 @@ const TaskDrawer = ({
   });
 
   const requestClose = () => {
+    if (skipClosePromptRef.current) {
+      skipClosePromptRef.current = false;
+      onClose();
+      return;
+    }
+
     if (isSaving) {
       return;
     }
@@ -485,6 +493,7 @@ const TaskDrawer = ({
     if (!taskId) {
       initialValuesRef.current = null;
       setIsDiscardModalOpen(false);
+      skipClosePromptRef.current = false;
     }
   }, [taskId]);
 
@@ -576,7 +585,9 @@ const TaskDrawer = ({
         assignee_ids: normalizedAssigneeIds,
         tag_ids: normalizedTagIds,
       });
+      form.resetFields();
       setIsDiscardModalOpen(false);
+      skipClosePromptRef.current = true;
       message.success("Tarea actualizada correctamente.");
       onClose();
     } catch (error) {
@@ -984,7 +995,7 @@ const KanbanCard = ({
           </Space>
 
           {task.due_date ? (
-            <DateField format="YYYY-MM-DD" value={task.due_date} />
+            <DateField format="DD/MM/YYYY" value={task.due_date} />
           ) : (
             <Typography.Text type="secondary">Sin fecha</Typography.Text>
           )}
@@ -1084,7 +1095,7 @@ const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
           </Space>
 
           {task.due_date ? (
-            <DateField format="YYYY-MM-DD" value={task.due_date} />
+            <DateField format="DD/MM/YYYY" value={task.due_date} />
           ) : (
             <Typography.Text type="secondary">Sin fecha</Typography.Text>
           )}

@@ -289,7 +289,7 @@ export const Home = () => {
                   responsive={["md"]}
                   title="Fecha limite"
                   render={(value: string | null) =>
-                    value ? <DateField format="YYYY-MM-DD" value={value} /> : "Sin fecha"
+                    value ? <DateField format="DD/MM/YYYY" value={value} /> : "Sin fecha"
                   }
                 />
               </Table>
@@ -333,7 +333,7 @@ export const Home = () => {
                           <Typography.Text type="secondary">
                             Creado:{" "}
                             <DateField
-                              format="YYYY-MM-DD"
+                              format="DD/MM/YYYY"
                               value={project.created_at}
                             />
                           </Typography.Text>

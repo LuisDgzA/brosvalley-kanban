@@ -102,7 +102,7 @@ export const ProjectsList = () => {
                         <Typography.Text type="secondary">Fecha limite</Typography.Text>
                         <div>
                           {record.due_date ? (
-                            <DateField format="YYYY-MM-DD" value={record.due_date} />
+                            <DateField format="DD/MM/YYYY" value={record.due_date} />
                           ) : (
                             <Typography.Text strong>Sin fecha</Typography.Text>
                           )}
