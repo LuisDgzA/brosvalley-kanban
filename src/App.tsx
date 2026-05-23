@@ -97,6 +97,18 @@ function App() {
                   {
                     name: "task_activity",
                   },
+                  {
+                    name: "task_assignees",
+                  },
+                  {
+                    name: "project_tags",
+                  },
+                  {
+                    name: "task_tags",
+                  },
+                  {
+                    name: "user_notifications",
+                  },
                 ]}
               >
                 <Routes>

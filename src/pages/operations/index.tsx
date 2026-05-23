@@ -19,6 +19,7 @@ import {
 import dayjs from "dayjs";
 import { useMemo } from "react";
 
+import { getTaskAssigneeIds } from "../projects/task-relations";
 import type { ProfileRecord, ProjectRecord, TaskRecord } from "../projects/types";
 
 type TaskFull = TaskRecord & {
@@ -67,7 +68,8 @@ export const Operations = () => {
     resource: "tasks",
     pagination: { mode: "off" },
     meta: {
-      select: "id,title,status,due_date,assigned_to,project_id,created_at",
+      select:
+        "id,title,status,due_date,assigned_to,project_id,created_at,task_assignees(id,user_id,profiles:profiles!task_assignees_user_id_fkey(id,name,email,avatar_url))",
     },
   });
 
@@ -120,7 +122,7 @@ export const Operations = () => {
 
     return profiles
       .map((profile) => {
-        const assigned = tasks.filter((t) => t.assigned_to === profile.id);
+        const assigned = tasks.filter((t) => getTaskAssigneeIds(t).includes(profile.id));
         const open = assigned.filter((t) => t.status !== "DONE").length;
         const overdue = assigned.filter(
           (t) =>

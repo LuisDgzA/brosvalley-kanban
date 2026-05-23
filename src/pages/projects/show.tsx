@@ -1,25 +1,33 @@
 import { DateField, EditButton, ListButton, Show } from "@refinedev/antd";
-import { useList, useOne } from "@refinedev/core";
+import { useInvalidate, useList, useOne } from "@refinedev/core";
 import {
   Avatar,
   Badge,
+  Button,
   Card,
+  ColorPicker,
   Col,
   Descriptions,
   Empty,
+  Form,
   Grid,
+  Input,
+  Modal,
   Row,
   Space,
   Table,
   Tag,
   Typography,
 } from "antd";
+import { useState } from "react";
 import { useParams } from "react-router";
 
 import { useProjectAccess } from "@/hooks/useProjectAccess";
+import { supabaseClient } from "@/providers/supabase";
 
 import { DeleteProjectButton } from "./DeleteProjectButton";
-import type { ProjectMemberRecord, ProjectRecord, TaskRecord } from "./types";
+import { getTaskAssigneeNames, getTaskTagItems } from "./task-relations";
+import type { ProjectMemberRecord, ProjectRecord, ProjectTagRecord, TaskRecord } from "./types";
 
 const statusColorMap: Record<string, string> = {
   TODO: "default",
@@ -32,6 +40,10 @@ export const ProjectsShow = () => {
   const { id } = useParams();
   const screens = Grid.useBreakpoint();
   const { canDeleteProject, canManageProject } = useProjectAccess();
+  const invalidate = useInvalidate();
+  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
+  const [isSubmittingTag, setIsSubmittingTag] = useState(false);
+  const [tagForm] = Form.useForm<{ label: string; color: string }>();
 
   const { result: project, query: projectQuery } = useOne<ProjectRecord>({
     resource: "projects",
@@ -60,6 +72,20 @@ export const ProjectsShow = () => {
     filters: id ? [{ field: "project_id", operator: "eq", value: id }] : [],
     pagination: { mode: "off" },
     sorters: [{ field: "created_at", order: "desc" }],
+    meta: {
+      select:
+        "id,title,status,due_date,assigned_to,project_id,created_at,task_assignees(id,user_id,profiles:profiles!task_assignees_user_id_fkey(id,name,email,avatar_url)),task_tags(id,project_tags(id,label,color))",
+    },
+    queryOptions: {
+      enabled: !!id,
+    },
+  });
+
+  const { result: tagsResult, query: tagsQuery } = useList<ProjectTagRecord>({
+    resource: "project_tags",
+    filters: id ? [{ field: "project_id", operator: "eq", value: id }] : [],
+    pagination: { mode: "off" },
+    sorters: [{ field: "label", order: "asc" }],
     queryOptions: {
       enabled: !!id,
     },
@@ -69,9 +95,54 @@ export const ProjectsShow = () => {
   const members = membersResult.data ?? [];
   const membersLoading = membersQuery.isLoading;
   const tasks = tasksResult.data ?? [];
+  const tags = tagsResult.data ?? [];
   const tasksLoading = tasksQuery.isLoading;
+  const tagsLoading = tagsQuery.isLoading;
   const doneTasks = tasks.filter((task) => task.status === "DONE").length;
   const progress = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
+
+  const handleCreateTag = async () => {
+    if (!id) return;
+
+    try {
+      const values = await tagForm.validateFields();
+      setIsSubmittingTag(true);
+
+      const { error } = await supabaseClient.from("project_tags").insert({
+        project_id: id,
+        label: values.label.trim(),
+        color: values.color,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await Promise.all([
+        invalidate({ resource: "project_tags", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_tags", invalidates: ["list", "many", "detail"] }),
+      ]);
+
+      tagForm.resetFields();
+      tagForm.setFieldValue("color", "#1677ff");
+      setIsTagModalOpen(false);
+    } finally {
+      setIsSubmittingTag(false);
+    }
+  };
+
+  const archiveTag = async (tagId: string) => {
+    await supabaseClient
+      .from("project_tags")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", tagId);
+
+    await Promise.all([
+      invalidate({ resource: "project_tags", invalidates: ["list", "many", "detail"] }),
+      invalidate({ resource: "task_tags", invalidates: ["list", "many", "detail"] }),
+      invalidate({ resource: "tasks", invalidates: ["list", "many", "detail"] }),
+    ]);
+  };
 
   return (
     <Show
@@ -190,6 +261,47 @@ export const ProjectsShow = () => {
           </Col>
 
           <Col span={24}>
+            <Card
+              className="glass-card"
+              extra={
+                id && canManageProject(id) ? (
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      tagForm.setFieldsValue({ color: "#1677ff" });
+                      setIsTagModalOpen(true);
+                    }}
+                  >
+                    Nuevo tag
+                  </Button>
+                ) : null
+              }
+              loading={tagsLoading}
+              title="Tags del proyecto"
+            >
+              {tags.length === 0 ? (
+                <Empty
+                  description="Todavia no hay tags creados."
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ) : (
+                <Space size={[8, 8]} wrap>
+                  {tags.map((tag) => (
+                    <Space key={tag.id} size={6}>
+                      <Tag color={tag.color}>{tag.label}</Tag>
+                      {id && canManageProject(id) ? (
+                        <Button size="small" type="link" danger onClick={() => void archiveTag(tag.id)}>
+                          Archivar
+                        </Button>
+                      ) : null}
+                    </Space>
+                  ))}
+                </Space>
+              )}
+            </Card>
+          </Col>
+
+          <Col span={24}>
             <Card className="glass-card" loading={tasksLoading} title="Tareas del proyecto">
               <div className="app-table-wrap">
                 <Table<TaskRecord>
@@ -202,6 +314,30 @@ export const ProjectsShow = () => {
                   scroll={{ x: 560 }}
                 >
                   <Table.Column<TaskRecord> dataIndex="title" title="Titulo" />
+                  <Table.Column<TaskRecord>
+                    title="Responsables"
+                    render={(_: unknown, record) => {
+                      const names = getTaskAssigneeNames(record);
+                      return names.length > 0 ? names.join(", ") : "Sin responsables";
+                    }}
+                  />
+                  <Table.Column<TaskRecord>
+                    title="Tags"
+                    render={(_: unknown, record) => {
+                      const taskTags = getTaskTagItems(record);
+                      return taskTags.length > 0 ? (
+                        <Space size={[4, 4]} wrap>
+                          {taskTags.map((tag) => (
+                            <Tag key={tag.id} color={tag.color}>
+                              {tag.label}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        "Sin tags"
+                      );
+                    }}
+                  />
                   <Table.Column<TaskRecord>
                     dataIndex="status"
                     title="Status"
@@ -223,6 +359,40 @@ export const ProjectsShow = () => {
           </Col>
         </Row>
       </div>
+
+      <Modal
+        confirmLoading={isSubmittingTag}
+        okText="Guardar tag"
+        onCancel={() => setIsTagModalOpen(false)}
+        onOk={() => void handleCreateTag()}
+        open={isTagModalOpen}
+        title="Nuevo tag del proyecto"
+      >
+        <Form form={tagForm} layout="vertical">
+          <Form.Item
+            label="Texto"
+            name="label"
+            rules={[{ required: true, message: "Ingresa el nombre del tag" }]}
+          >
+            <Input placeholder="Backend, Cliente A, Sprint 1" />
+          </Form.Item>
+          <Form.Item
+            initialValue="#1677ff"
+            label="Color"
+            name="color"
+            rules={[{ required: true, message: "Selecciona un color" }]}
+          >
+            <ColorPicker
+              format="hex"
+              onChangeComplete={(value) => tagForm.setFieldValue("color", value.toHexString())}
+              showText
+            />
+          </Form.Item>
+          <Tag color={tagForm.getFieldValue("color") || "#1677ff"}>
+            {tagForm.getFieldValue("label") || "Preview"}
+          </Tag>
+        </Form>
+      </Modal>
     </Show>
   );
 };

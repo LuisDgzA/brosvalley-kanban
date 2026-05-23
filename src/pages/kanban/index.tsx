@@ -28,6 +28,7 @@ import {
   type HttpError,
   useCreate,
   useGetIdentity,
+  useInvalidate,
   useList,
   useOne,
   useUpdate,
@@ -38,6 +39,7 @@ import {
   Badge,
   Button,
   Card,
+  ColorPicker,
   DatePicker,
   Divider,
   Drawer,
@@ -59,8 +61,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import type { AuthUser } from "@/providers/auth";
+import { supabaseClient } from "@/providers/supabase";
 import { useProjectAccess } from "@/hooks/useProjectAccess";
-import type { ProjectMemberRecord } from "@/pages/projects/types";
+import {
+  getTaskAssigneeIds as getSharedTaskAssigneeIds,
+  getTaskAssigneeNames as getSharedTaskAssigneeNames,
+  getTaskTagItems,
+  syncTaskTags,
+} from "@/pages/projects/task-relations";
+import type { ProjectMemberRecord, ProjectTagRecord } from "@/pages/projects/types";
 
 const KANBAN_STATUSES = [
   "TODO",
@@ -99,6 +108,7 @@ type KanbanTask = {
   due_date: string | null;
   created_by: string | null;
   created_at: string;
+  completed_at: string | null;
   updated_at: string;
   assigned_profile?: {
     id: string;
@@ -106,6 +116,24 @@ type KanbanTask = {
     email: string | null;
     avatar_url: string | null;
   } | null;
+  task_assignees?: {
+    id: string;
+    user_id: string;
+    profiles?: {
+      id: string;
+      name: string | null;
+      email: string | null;
+      avatar_url: string | null;
+    } | null;
+  }[];
+  task_tags?: {
+    id: string;
+    project_tags?: {
+      id: string;
+      label: string;
+      color: string;
+    } | null;
+  }[];
   projects?: {
     name: string | null;
   } | null;
@@ -127,30 +155,23 @@ type ProjectMemberOption = ProjectMemberRecord & {
   profiles?: ProfileOption | null;
 };
 
+type ProjectTagOption = ProjectTagRecord;
+
 type TaskCreateValues = {
   title: string;
   description?: string;
-  assigned_to?: string;
+  assignee_ids?: string[];
+  tag_ids?: string[];
   project_id?: string;
   due_date?: Dayjs | null;
   priority?: Priority;
 };
 
-type TaskMutationValues = {
-  title: string;
-  description: string | null;
-  status: KanbanStatus;
-  priority: Priority;
-  project_id: string;
-  assigned_to: string | null;
-  due_date: string | null;
-  created_by: string | null;
-};
-
 type TaskEditValues = {
   title: string;
   description?: string;
-  assigned_to?: string;
+  assignee_ids?: string[];
+  tag_ids?: string[];
   project_id?: string;
   due_date?: Dayjs | null;
   status: KanbanStatus;
@@ -160,7 +181,8 @@ type TaskEditValues = {
 type NormalizedTaskEditValues = {
   title: string;
   description: string;
-  assigned_to: string;
+  assignee_ids: string[];
+  tag_ids: string[];
   project_id: string;
   due_date: string;
   status: KanbanStatus;
@@ -217,6 +239,10 @@ const activityLabel = (
       return `Status: ${old_value ?? "—"} → ${new_value ?? "—"}`;
     case "task_assignee_changed":
       return `Responsable: ${old_value || "ninguno"} → ${new_value || "ninguno"}`;
+    case "task_assignee_added":
+      return `Responsable agregado: ${new_value || "sin usuario"}`;
+    case "task_assignee_removed":
+      return `Responsable removido: ${old_value || "sin usuario"}`;
     case "task_priority_changed":
       return `Prioridad: ${old_value ?? "—"} → ${new_value ?? "—"}`;
     case "task_due_date_changed":
@@ -249,9 +275,33 @@ const mapMemberOptions = (members: ProjectMemberOption[]) =>
     label:
       member.profiles?.name ||
       member.profiles?.email ||
-      member.user_id,
+    member.user_id,
     value: member.user_id,
   }));
+
+const getTaskAssignees = (task: KanbanTask) => {
+  if ((task.task_assignees?.length ?? 0) > 0) {
+    return task.task_assignees ?? [];
+  }
+
+  if (task.assigned_to || task.assigned_profile) {
+    return [
+      {
+        id: `legacy-${task.id}`,
+        user_id: task.assigned_to ?? task.assigned_profile?.id ?? "",
+        profiles: task.assigned_profile ?? null,
+      },
+    ];
+  }
+
+  return [];
+};
+
+const getTaskAssigneeIds = (task: KanbanTask) =>
+  getSharedTaskAssigneeIds(task);
+
+const getTaskAssigneeNames = (task: KanbanTask) =>
+  getSharedTaskAssigneeNames(task);
 
 const TaskDrawer = ({
   taskId,
@@ -267,6 +317,7 @@ const TaskDrawer = ({
   const screens = Grid.useBreakpoint();
 
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const invalidate = useInvalidate();
   const { buildProjectAccessFilters, isLoading: permissionsLoading } = useProjectAccess();
 
   const { mutate: createComment } = useCreate<TaskComment>();
@@ -296,14 +347,14 @@ const TaskDrawer = ({
     id: taskId ?? "",
     meta: {
       select:
-        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at",
+        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),task_assignees(id,user_id,profiles:profiles!task_assignees_user_id_fkey(id,name,email,avatar_url)),task_tags(id,project_tags(id,label,color))",
     },
     queryOptions: {
       enabled: Boolean(taskId) && !permissionsLoading,
     },
   });
 
-  const { formProps, onFinish, form, formLoading } = useForm<
+  const { formProps, form, formLoading } = useForm<
     KanbanTask,
     HttpError,
     any
@@ -325,7 +376,8 @@ const TaskDrawer = ({
   ): NormalizedTaskEditValues => ({
     title: values?.title?.trim() ?? "",
     description: values?.description?.trim() ?? "",
-    assigned_to: values?.assigned_to ?? "",
+    assignee_ids: [...(values?.assignee_ids ?? [])].sort(),
+    tag_ids: [...(values?.tag_ids ?? [])].sort(),
     project_id: values?.project_id ?? "",
     due_date: values?.due_date ? values.due_date.format("YYYY-MM-DD") : "",
     status: values?.status ?? "TODO",
@@ -381,7 +433,23 @@ const TaskDrawer = ({
     },
   });
 
+  const { result: projectTagsResult, query: projectTagsQuery } = useList<ProjectTagOption>({
+    resource: "project_tags",
+    filters: buildProjectScopedFilters([], watchedProjectId),
+    pagination: {
+      mode: "off",
+    },
+    sorters: [{ field: "label", order: "asc" }],
+    queryOptions: {
+      enabled: Boolean(taskId && watchedProjectId) && !permissionsLoading,
+    },
+  });
+
   const profileOptions = mapMemberOptions(projectMembersResult.data ?? []);
+  const tagOptions = (projectTagsResult.data ?? []).map((tag) => ({
+    label: tag.label,
+    value: tag.id,
+  }));
 
   const projectOptions = (projectsResult.data ?? []).map((project) => ({
     label: project.name,
@@ -396,7 +464,8 @@ const TaskDrawer = ({
     const initialValues: TaskEditValues = {
       title: taskResult.title,
       description: taskResult.description ?? undefined,
-      assigned_to: taskResult.assigned_to ?? undefined,
+      assignee_ids: getTaskAssigneeIds(taskResult),
+      tag_ids: getTaskTagItems(taskResult).map((tag) => tag.id),
       project_id: taskResult.project_id,
       due_date: taskResult.due_date ? dayjs(taskResult.due_date) : null,
       status: taskResult.status,
@@ -415,22 +484,42 @@ const TaskDrawer = ({
   }, [taskId]);
 
   useEffect(() => {
-    const selectedAssignee = form.getFieldValue("assigned_to") as string | undefined;
-    if (!selectedAssignee) {
+    const selectedAssignees = (form.getFieldValue("assignee_ids") as string[] | undefined) ?? [];
+    if (selectedAssignees.length === 0) {
       return;
     }
 
     const allowedAssignees = new Set(profileOptions.map((option) => option.value));
-    if (!allowedAssignees.has(selectedAssignee)) {
-      form.setFieldValue("assigned_to", undefined);
+    const filteredAssignees = selectedAssignees.filter((assigneeId) =>
+      allowedAssignees.has(assigneeId),
+    );
+
+    if (filteredAssignees.length !== selectedAssignees.length) {
+      form.setFieldValue("assignee_ids", filteredAssignees);
     }
   }, [form, profileOptions]);
 
+  useEffect(() => {
+    const selectedTags = (form.getFieldValue("tag_ids") as string[] | undefined) ?? [];
+    if (selectedTags.length === 0) {
+      return;
+    }
+
+    const allowedTags = new Set((projectTagsResult.data ?? []).map((tag) => tag.id));
+    const filteredTags = selectedTags.filter((tagId) => allowedTags.has(tagId));
+
+    if (filteredTags.length !== selectedTags.length) {
+      form.setFieldValue("tag_ids", filteredTags);
+    }
+  }, [form, projectTagsResult.data]);
+
   const handleSubmit = async (values: TaskEditValues) => {
+    const normalizedAssigneeIds = [...new Set(values.assignee_ids ?? [])];
+    const normalizedTagIds = [...new Set(values.tag_ids ?? [])];
     const payload = {
       title: values.title.trim(),
       description: values.description?.trim() || null,
-      assigned_to: values.assigned_to || null,
+      assigned_to: normalizedAssigneeIds[0] ?? null,
       project_id: values.project_id || null,
       due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
       status: values.status,
@@ -439,7 +528,33 @@ const TaskDrawer = ({
     };
 
     try {
-      await onFinish(payload);
+      const { error } = await supabaseClient
+        .from("tasks")
+        .update(payload)
+        .eq("id", taskId ?? "");
+
+      if (error) {
+        throw error;
+      }
+
+      const { error: assigneesError } = await supabaseClient.rpc("set_task_assignees", {
+        target_task_id: taskId,
+        next_user_ids: normalizedAssigneeIds,
+      });
+
+      if (assigneesError) {
+        throw assigneesError;
+      }
+
+      await syncTaskTags(taskId ?? "", normalizedTagIds, currentUser?.id);
+
+      await Promise.all([
+        invalidate({ resource: "tasks", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_assignees", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_activity", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_tags", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "user_notifications", invalidates: ["list", "many", "detail"] }),
+      ]);
 
       message.success("Tarea actualizada correctamente.");
       onClose();
@@ -495,15 +610,29 @@ const TaskDrawer = ({
               <Input.TextArea rows={4} />
             </Form.Item>
 
-            <Form.Item label="Asignado a" name="assigned_to">
+            <Form.Item label="Responsables" name="assignee_ids">
               <Select
-                allowClear
                 disabled={!watchedProjectId}
                 loading={projectMembersQuery.isLoading}
+                mode="multiple"
                 options={profileOptions}
                 placeholder={
                   watchedProjectId
-                    ? "Selecciona un miembro del proyecto"
+                    ? "Selecciona uno o varios miembros del proyecto"
+                    : "Selecciona primero el proyecto"
+                }
+              />
+            </Form.Item>
+
+            <Form.Item label="Tags" name="tag_ids">
+              <Select
+                disabled={!watchedProjectId}
+                loading={projectTagsQuery.isLoading}
+                mode="multiple"
+                options={tagOptions}
+                placeholder={
+                  watchedProjectId
+                    ? "Selecciona tags del proyecto"
                     : "Selecciona primero el proyecto"
                 }
               />
@@ -725,8 +854,15 @@ const KanbanCard = ({
       : "0 6px 18px rgba(15, 23, 42, 0.06)",
   };
 
+  const assigneeNames = getTaskAssigneeNames(task);
+  const assigneeCount = assigneeNames.length;
   const assigneeLabel =
-    task.assigned_profile?.name || task.assigned_profile?.email || "Unassigned";
+    assigneeCount === 0
+      ? "Sin responsables"
+      : assigneeCount === 1
+        ? assigneeNames[0]
+        : `${assigneeNames.slice(0, 2).join(", ")}${assigneeCount > 2 ? ` +${assigneeCount - 2}` : ""}`;
+  const assignees = getTaskAssignees(task);
 
   return (
     <Card
@@ -774,15 +910,43 @@ const KanbanCard = ({
           {task.projects?.name || "Sin proyecto"}
         </Typography.Text>
 
+        {getTaskTagItems(task).length > 0 && (
+          <Space size={[6, 6]} wrap>
+            {getTaskTagItems(task).map((tag) => (
+              <Tag key={tag.id} color={tag.color}>
+                {tag.label}
+              </Tag>
+            ))}
+          </Space>
+        )}
+
         <Space
           size={[10, 10]}
           style={{ justifyContent: "space-between", width: "100%" }}
           wrap
         >
           <Space size={10}>
-            <Avatar src={task.assigned_profile?.avatar_url ?? undefined}>
-              {assigneeLabel.slice(0, 1).toUpperCase()}
-            </Avatar>
+            {assigneeCount === 0 ? (
+              <Avatar>S</Avatar>
+            ) : (
+              <Avatar.Group max={{ count: 2 }}>
+                {assignees.map((assignee) => {
+                  const label =
+                    assignee.profiles?.name ||
+                    assignee.profiles?.email ||
+                    assignee.user_id;
+
+                  return (
+                    <Avatar
+                      key={assignee.id}
+                      src={assignee.profiles?.avatar_url ?? undefined}
+                    >
+                      {label.slice(0, 1).toUpperCase()}
+                    </Avatar>
+                  );
+                })}
+              </Avatar.Group>
+            )}
             <Typography.Text type="secondary">{assigneeLabel}</Typography.Text>
           </Space>
 
@@ -798,8 +962,15 @@ const KanbanCard = ({
 };
 
 const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
+  const assigneeNames = getTaskAssigneeNames(task);
+  const assigneeCount = assigneeNames.length;
   const assigneeLabel =
-    task.assigned_profile?.name || task.assigned_profile?.email || "Unassigned";
+    assigneeCount === 0
+      ? "Sin responsables"
+      : assigneeCount === 1
+        ? assigneeNames[0]
+        : `${assigneeNames.slice(0, 2).join(", ")}${assigneeCount > 2 ? ` +${assigneeCount - 2}` : ""}`;
+  const assignees = getTaskAssignees(task);
 
   return (
     <Card
@@ -839,15 +1010,43 @@ const KanbanCardPreview = ({ task }: { task: KanbanTask }) => {
           {task.projects?.name || "Sin proyecto"}
         </Typography.Text>
 
+        {getTaskTagItems(task).length > 0 && (
+          <Space size={[6, 6]} wrap>
+            {getTaskTagItems(task).map((tag) => (
+              <Tag key={tag.id} color={tag.color}>
+                {tag.label}
+              </Tag>
+            ))}
+          </Space>
+        )}
+
         <Space
           size={[10, 10]}
           style={{ justifyContent: "space-between", width: "100%" }}
           wrap
         >
           <Space size={10}>
-            <Avatar src={task.assigned_profile?.avatar_url ?? undefined}>
-              {assigneeLabel.slice(0, 1).toUpperCase()}
-            </Avatar>
+            {assigneeCount === 0 ? (
+              <Avatar>S</Avatar>
+            ) : (
+              <Avatar.Group max={{ count: 2 }}>
+                {assignees.map((assignee) => {
+                  const label =
+                    assignee.profiles?.name ||
+                    assignee.profiles?.email ||
+                    assignee.user_id;
+
+                  return (
+                    <Avatar
+                      key={assignee.id}
+                      src={assignee.profiles?.avatar_url ?? undefined}
+                    >
+                      {label.slice(0, 1).toUpperCase()}
+                    </Avatar>
+                  );
+                })}
+              </Avatar.Group>
+            )}
             <Typography.Text type="secondary">{assigneeLabel}</Typography.Text>
           </Space>
 
@@ -940,6 +1139,7 @@ export const Kanban = () => {
   const sensors = useSensors(useSensor(PointerSensor));
   const screens = Grid.useBreakpoint();
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const invalidate = useInvalidate();
   const {
     buildProjectAccessFilters,
     canAccessProject,
@@ -958,6 +1158,7 @@ export const Kanban = () => {
   const [activeQuickFilter, setActiveQuickFilter] = useState<
     "vencidas" | "sin-asignar" | "esta-semana" | "por-revisar" | null
   >(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [taskForm] = Form.useForm<TaskCreateValues>();
   const watchedCreateProjectId = Form.useWatch("project_id", taskForm);
 
@@ -965,12 +1166,6 @@ export const Kanban = () => {
     KanbanTask,
     HttpError,
     Partial<KanbanTask>
-  >();
-
-  const { mutate: createTask, mutation: createMutation } = useCreate<
-    KanbanTask,
-    HttpError,
-    TaskMutationValues
   >();
 
   const { result: tasksResult, query: tasksQuery } = useList<KanbanTask>({
@@ -986,7 +1181,7 @@ export const Kanban = () => {
     sorters: [{ field: "created_at", order: "desc" }],
     meta: {
       select:
-        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),projects(name)",
+        "id,title,description,status,priority,project_id,assigned_to,due_date,created_by,created_at,updated_at,assigned_profile:profiles!tasks_assigned_to_fkey(id,name,email,avatar_url),task_assignees(id,user_id,profiles:profiles!task_assignees_user_id_fkey(id,name,email,avatar_url)),task_tags(id,project_tags(id,label,color)),projects(name)",
     },
     queryOptions: {
       enabled: !permissionsLoading,
@@ -1021,8 +1216,24 @@ export const Kanban = () => {
     },
   });
 
+  const { result: boardProjectTagsResult, query: boardProjectTagsQuery } = useList<ProjectTagOption>({
+    resource: "project_tags",
+    filters: buildProjectScopedFilters([], watchedCreateProjectId || selectedProjectId),
+    pagination: {
+      mode: "off",
+    },
+    sorters: [{ field: "label", order: "asc" }],
+    queryOptions: {
+      enabled: Boolean((watchedCreateProjectId || selectedProjectId) && !permissionsLoading),
+    },
+  });
+
   const tasks = tasksResult.data ?? [];
   const projects = projectsResult.data ?? [];
+  const boardTagOptions = (boardProjectTagsResult.data ?? []).map((tag) => ({
+    label: tag.label,
+    value: tag.id,
+  }));
 
   const quickFilterCounts = useMemo(() => {
     const today = dayjs().startOf("day");
@@ -1031,7 +1242,7 @@ export const Kanban = () => {
       vencidas: tasks.filter(
         (t) => t.due_date && dayjs(t.due_date).isBefore(today) && t.status !== "DONE",
       ).length,
-      "sin-asignar": tasks.filter((t) => !t.assigned_to).length,
+      "sin-asignar": tasks.filter((t) => getTaskAssigneeIds(t).length === 0).length,
       "esta-semana": tasks.filter((t) => {
         if (!t.due_date || t.status === "DONE") return false;
         const d = dayjs(t.due_date);
@@ -1042,28 +1253,37 @@ export const Kanban = () => {
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
-    if (!activeQuickFilter) return tasks;
+    let nextTasks = tasks;
+
+    if (selectedTagIds.length > 0) {
+      nextTasks = nextTasks.filter((task) => {
+        const taskTagIds = new Set(getTaskTagItems(task).map((tag) => tag.id));
+        return selectedTagIds.every((tagId) => taskTagIds.has(tagId));
+      });
+    }
+
+    if (!activeQuickFilter) return nextTasks;
     const today = dayjs().startOf("day");
     const weekEnd = today.add(7, "day");
     switch (activeQuickFilter) {
       case "vencidas":
-        return tasks.filter(
+        return nextTasks.filter(
           (t) => t.due_date && dayjs(t.due_date).isBefore(today) && t.status !== "DONE",
         );
       case "sin-asignar":
-        return tasks.filter((t) => !t.assigned_to);
+        return nextTasks.filter((t) => getTaskAssigneeIds(t).length === 0);
       case "esta-semana":
-        return tasks.filter((t) => {
+        return nextTasks.filter((t) => {
           if (!t.due_date || t.status === "DONE") return false;
           const d = dayjs(t.due_date);
           return (d.isSame(today) || d.isAfter(today)) && d.isBefore(weekEnd);
         });
       case "por-revisar":
-        return tasks.filter((t) => t.status === "IN_REVIEW");
+        return nextTasks.filter((t) => t.status === "IN_REVIEW");
       default:
-        return tasks;
+        return nextTasks;
     }
-  }, [tasks, activeQuickFilter]);
+  }, [tasks, activeQuickFilter, selectedTagIds]);
 
   const tasksByStatus = useMemo(() => {
     return KANBAN_STATUSES.reduce(
@@ -1084,7 +1304,7 @@ export const Kanban = () => {
 
   const selectedProjectName =
     projects.find((project) => project.id === selectedProjectId)?.name ?? null;
-  const unassignedTasks = tasks.filter((task) => !task.assigned_to).length;
+  const unassignedTasks = tasks.filter((task) => getTaskAssigneeIds(task).length === 0).length;
   const dueTasks = tasks.filter((task) => task.due_date).length;
 
   useEffect(() => {
@@ -1115,16 +1335,34 @@ export const Kanban = () => {
   }, [canAccessProject, projects.length, selectedProjectId, setSearchParams]);
 
   useEffect(() => {
-    const selectedAssignee = taskForm.getFieldValue("assigned_to") as string | undefined;
-    if (!selectedAssignee) {
+    const selectedAssignees = (taskForm.getFieldValue("assignee_ids") as string[] | undefined) ?? [];
+    if (selectedAssignees.length === 0) {
       return;
     }
 
     const allowedAssignees = new Set(profileOptions.map((option) => option.value));
-    if (!allowedAssignees.has(selectedAssignee)) {
-      taskForm.setFieldValue("assigned_to", undefined);
+    const filteredAssignees = selectedAssignees.filter((assigneeId) =>
+      allowedAssignees.has(assigneeId),
+    );
+
+    if (filteredAssignees.length !== selectedAssignees.length) {
+      taskForm.setFieldValue("assignee_ids", filteredAssignees);
     }
   }, [profileOptions, taskForm]);
+
+  useEffect(() => {
+    const selectedTags = (taskForm.getFieldValue("tag_ids") as string[] | undefined) ?? [];
+    if (selectedTags.length === 0) {
+      return;
+    }
+
+    const allowedTags = new Set((boardProjectTagsResult.data ?? []).map((tag) => tag.id));
+    const filteredTags = selectedTags.filter((tagId) => allowedTags.has(tagId));
+
+    if (filteredTags.length !== selectedTags.length) {
+      taskForm.setFieldValue("tag_ids", filteredTags);
+    }
+  }, [boardProjectTagsResult.data, taskForm]);
 
   const openCreateModal = (status: KanbanStatus) => {
     setSelectedStatus(status);
@@ -1239,38 +1477,57 @@ export const Kanban = () => {
   const handleCreateTask = async () => {
     try {
       const values = await taskForm.validateFields();
+      const assigneeIds = [...new Set(values.assignee_ids ?? [])];
+      const tagIds = [...new Set(values.tag_ids ?? [])];
 
       if (!canAccessProject(values.project_id)) {
         message.error("Solo puedes crear tareas en proyectos donde participas.");
         return;
       }
 
-      createTask(
-        {
-          resource: "tasks",
-          values: {
-            title: values.title.trim(),
-            description: values.description?.trim() || null,
-            status: selectedStatus,
-            priority: values.priority ?? "MEDIUM",
-            project_id: values.project_id as string,
-            assigned_to: values.assigned_to || null,
-            due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
-            created_by: currentUser?.id ?? null,
-          },
-        },
-        {
-          onSuccess: () => {
-            message.success("Tarea creada correctamente.");
-            closeCreateModal();
-          },
-          onError: (error) => {
-            message.error(error.message || "No se pudo crear la tarea.");
-          },
-        },
-      );
-    } catch {
-      return;
+      const { data, error } = await supabaseClient
+        .from("tasks")
+        .insert({
+          title: values.title.trim(),
+          description: values.description?.trim() || null,
+          status: selectedStatus,
+          priority: values.priority ?? "MEDIUM",
+          project_id: values.project_id as string,
+          assigned_to: assigneeIds[0] ?? null,
+          due_date: values.due_date?.format("YYYY-MM-DD") ?? null,
+          created_by: currentUser?.id ?? null,
+        })
+        .select("id")
+        .single();
+
+      if (error || !data?.id) {
+        throw error ?? new Error("No se pudo crear la tarea.");
+      }
+
+      const { error: assigneesError } = await supabaseClient.rpc("set_task_assignees", {
+        target_task_id: data.id,
+        next_user_ids: assigneeIds,
+      });
+
+      if (assigneesError) {
+        throw assigneesError;
+      }
+
+      await syncTaskTags(data.id, tagIds, currentUser?.id);
+
+      await Promise.all([
+        invalidate({ resource: "tasks", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_assignees", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "task_tags", invalidates: ["list", "many", "detail"] }),
+        invalidate({ resource: "user_notifications", invalidates: ["list", "many", "detail"] }),
+      ]);
+
+      message.success("Tarea creada correctamente.");
+      closeCreateModal();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "No se pudo crear la tarea.";
+      message.error(errorMessage);
     }
   };
 
@@ -1442,6 +1699,26 @@ export const Kanban = () => {
                   </Space>
                 </div>
               </div>
+              <div>
+                <Typography.Text strong>Tags</Typography.Text>
+                <div style={{ marginTop: 4 }}>
+                  <Select
+                    allowClear
+                    disabled={!selectedProjectId}
+                    loading={boardProjectTagsQuery.isLoading}
+                    mode="multiple"
+                    options={boardTagOptions}
+                    placeholder={
+                      selectedProjectId
+                        ? "Filtrar por tags"
+                        : "Selecciona un proyecto para usar tags"
+                    }
+                    style={{ minWidth: 260, width: "100%" }}
+                    value={selectedTagIds}
+                    onChange={(value) => setSelectedTagIds(value ?? [])}
+                  />
+                </div>
+              </div>
             </Space>
           </Space>
         </Card>
@@ -1477,7 +1754,6 @@ export const Kanban = () => {
       </div>
 
       <Modal
-        confirmLoading={createMutation.isPending}
         okText="Crear tarea"
         onCancel={closeCreateModal}
         onOk={handleCreateTask}
@@ -1510,15 +1786,29 @@ export const Kanban = () => {
             />
           </Form.Item>
 
-          <Form.Item label="Asignado a" name="assigned_to">
+          <Form.Item label="Responsables" name="assignee_ids">
             <Select
-              allowClear
               disabled={!watchedCreateProjectId}
               loading={projectMembersQuery.isLoading}
+              mode="multiple"
               options={profileOptions}
               placeholder={
                 watchedCreateProjectId
-                  ? "Selecciona a un miembro del proyecto"
+                  ? "Selecciona uno o varios miembros del proyecto"
+                  : "Selecciona primero el proyecto"
+              }
+            />
+          </Form.Item>
+
+          <Form.Item label="Tags" name="tag_ids">
+            <Select
+              disabled={!watchedCreateProjectId}
+              loading={boardProjectTagsQuery.isLoading}
+              mode="multiple"
+              options={boardTagOptions}
+              placeholder={
+                watchedCreateProjectId
+                  ? "Selecciona tags del proyecto"
                   : "Selecciona primero el proyecto"
               }
             />

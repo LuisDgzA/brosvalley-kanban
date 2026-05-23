@@ -23,6 +23,7 @@ Regla de esta carpeta:
 - `06-finanzas-ligeras.md`
 - `07-evolucion-de-datos.md`
 - `08-control-de-acceso-y-hardening-operativo.md`
+- `09-multiples-responsables-tags-y-notificaciones-de-asignacion.md`
 
 ## Orden sugerido
 
@@ -34,6 +35,7 @@ Regla de esta carpeta:
 6. `05-notificaciones-y-kpis.md`
 7. `04-plantillas-y-etiquetas.md`
 8. `06-finanzas-ligeras.md`
+9. `09-multiples-responsables-tags-y-notificaciones-de-asignacion.md`
 
 ## Criterio de uso
 
