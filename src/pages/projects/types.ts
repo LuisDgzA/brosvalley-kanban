@@ -37,4 +37,28 @@ export type TaskRecord = {
   project_id: string;
   created_at: string;
   completed_at: string | null;
+  task_assignees?: {
+    id: string;
+    user_id: string;
+    profiles?: ProfileRecord | null;
+  }[];
+  task_tags?: {
+    id: string;
+    project_tags?: {
+      id: string;
+      label: string;
+      color: string;
+    } | null;
+  }[];
+};
+
+export type ProjectTagRecord = {
+  id: string;
+  project_id: string;
+  label: string;
+  color: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
 };

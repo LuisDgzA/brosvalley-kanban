@@ -24,6 +24,7 @@ import {
 import type { ReactNode } from "react";
 
 import type { AuthUser } from "@/providers/auth";
+import { getTaskAssigneeIds } from "@/pages/projects/task-relations";
 
 import type { ProjectRecord, TaskRecord } from "../projects/types";
 
@@ -124,16 +125,13 @@ export const Home = () => {
 
   const { result: myTasksResult, query: myTasksQuery } = useList<TaskWithProject>({
     resource: "tasks",
-    filters: currentUser?.id
-      ? [{ field: "assigned_to", operator: "eq", value: currentUser.id }]
-      : [],
     sorters: [{ field: "created_at", order: "desc" }],
     pagination: {
-      currentPage: 1,
-      pageSize: 5,
+      mode: "off",
     },
     meta: {
-      select: "id,title,status,due_date,assigned_to,project_id,created_at,projects(name)",
+      select:
+        "id,title,status,due_date,assigned_to,project_id,created_at,task_assignees(id,user_id,profiles:profiles!task_assignees_user_id_fkey(id,name,email,avatar_url)),projects(name)",
     },
     queryOptions: {
       enabled: Boolean(currentUser?.id),
@@ -150,7 +148,9 @@ export const Home = () => {
       },
     });
 
-  const myTasks = myTasksResult.data ?? [];
+  const myTasks = (myTasksResult.data ?? [])
+    .filter((task) => (currentUser?.id ? getTaskAssigneeIds(task).includes(currentUser.id) : false))
+    .slice(0, 5);
   const recentProjects = recentProjectsResult.data ?? [];
   const dueSoonTasks = myTasks.filter((task) => task.due_date).length;
 

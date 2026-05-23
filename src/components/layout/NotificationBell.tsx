@@ -2,9 +2,10 @@ import {
   BellOutlined,
   ClockCircleOutlined,
   CloseOutlined,
+  TeamOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { useGetIdentity, useList } from "@refinedev/core";
+import { useGetIdentity, useInvalidate, useList } from "@refinedev/core";
 import {
   Badge,
   Button,
@@ -21,22 +22,48 @@ import { useNavigate } from "react-router";
 
 import type { AuthUser } from "@/providers/auth";
 import type { TaskRecord } from "@/pages/projects/types";
+import { supabaseClient } from "@/providers/supabase";
 
 type TaskWithProject = TaskRecord & {
   projects?: { name: string | null } | null;
 };
 
-type NotificationItem = {
+type AssignmentNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  project_id: string | null;
+  task_id: string | null;
+  read_at: string | null;
+  created_at: string;
+  projects?: { name: string | null } | null;
+};
+
+type DueDateNotification = {
   key: string;
   type: "overdue" | "due_soon";
   task: TaskWithProject;
 };
+
+type NotificationItem =
+  | {
+      key: string;
+      kind: "assignment";
+      notification: AssignmentNotification;
+    }
+  | {
+      key: string;
+      kind: "due_date";
+      notification: DueDateNotification;
+    };
 
 const DUE_SOON_HOURS = 48;
 const STORAGE_KEY_PREFIX = "brosvalley-notification-dismissed";
 
 const NotificationBell = () => {
   const { data: currentUser } = useGetIdentity<AuthUser>();
+  const invalidate = useInvalidate();
   const navigate = useNavigate();
   const storageKey = currentUser?.id
     ? `${STORAGE_KEY_PREFIX}:${currentUser.id}`
@@ -58,11 +85,25 @@ const NotificationBell = () => {
     queryOptions: { enabled: Boolean(currentUser?.id) },
   });
 
-  const allNotifications = useMemo<NotificationItem[]>(() => {
+  const { result: assignmentNotificationsResult } = useList<AssignmentNotification>({
+    resource: "user_notifications",
+    filters: currentUser?.id ? [{ field: "recipient_user_id", operator: "eq", value: currentUser.id }] : [],
+    pagination: {
+      currentPage: 1,
+      pageSize: 20,
+    },
+    sorters: [{ field: "created_at", order: "desc" }],
+    meta: {
+      select: "id,type,title,body,project_id,task_id,read_at,created_at,projects(name)",
+    },
+    queryOptions: { enabled: Boolean(currentUser?.id) },
+  });
+
+  const allDueDateNotifications = useMemo<DueDateNotification[]>(() => {
     const tasks = result.data ?? [];
     const now = dayjs();
     const threshold = now.add(DUE_SOON_HOURS, "hour");
-    const items: NotificationItem[] = [];
+    const items: DueDateNotification[] = [];
 
     for (const task of tasks) {
       if (!task.due_date) continue;
@@ -81,7 +122,35 @@ const NotificationBell = () => {
     });
   }, [result.data]);
 
-  const notifications = allNotifications.filter((n) => !dismissed.has(n.key));
+  const notifications = useMemo<NotificationItem[]>(() => {
+    const assignments = (assignmentNotificationsResult.data ?? [])
+      .filter((item) => !item.read_at)
+      .map((notification) => ({
+        key: `assignment-${notification.id}`,
+        kind: "assignment" as const,
+        notification,
+      }));
+
+    const dueDateItems = allDueDateNotifications
+      .filter((item) => !dismissed.has(item.key))
+      .map((notification) => ({
+        key: notification.key,
+        kind: "due_date" as const,
+        notification,
+      }));
+
+    return [...assignments, ...dueDateItems].sort((a, b) => {
+      const aDate =
+        a.kind === "assignment"
+          ? dayjs(a.notification.created_at)
+          : dayjs(a.notification.task.due_date!);
+      const bDate =
+        b.kind === "assignment"
+          ? dayjs(b.notification.created_at)
+          : dayjs(b.notification.task.due_date!);
+      return bDate.valueOf() - aDate.valueOf();
+    });
+  }, [allDueDateNotifications, assignmentNotificationsResult.data, dismissed]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !currentUser?.id) {
@@ -107,7 +176,7 @@ const NotificationBell = () => {
       return;
     }
 
-    const validKeys = new Set(allNotifications.map((item) => item.key));
+    const validKeys = new Set(allDueDateNotifications.map((item) => item.key));
     const nextDismissed = new Set([...dismissed].filter((key) => validKeys.has(key)));
 
     if (nextDismissed.size !== dismissed.size) {
@@ -116,20 +185,69 @@ const NotificationBell = () => {
     }
 
     window.localStorage.setItem(storageKey, JSON.stringify([...nextDismissed]));
-  }, [allNotifications, currentUser?.id, dismissed, storageKey]);
+  }, [allDueDateNotifications, currentUser?.id, dismissed, storageKey]);
 
   const dismiss = (key: string) => {
     setDismissed((prev) => new Set(prev).add(key));
   };
 
-  const dismissAll = () => {
-    setDismissed(new Set(allNotifications.map((n) => n.key)));
+  const markAssignmentAsRead = async (notificationId: string) => {
+    const { error } = await supabaseClient
+      .from("user_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", notificationId)
+      .is("read_at", null);
+
+    if (error) {
+      throw error;
+    }
+
+    await invalidate({ resource: "user_notifications", invalidates: ["list", "many", "detail"] });
   };
 
-  const handleItemClick = (item: NotificationItem) => {
+  const dismissAll = async () => {
+    setDismissed(new Set(allDueDateNotifications.map((n) => n.key)));
+
+    if (!currentUser?.id) {
+      return;
+    }
+
+    const unreadAssignments = (assignmentNotificationsResult.data ?? []).filter(
+      (item) => !item.read_at,
+    );
+
+    if (unreadAssignments.length === 0) {
+      return;
+    }
+
+    const { error } = await supabaseClient
+      .from("user_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("recipient_user_id", currentUser.id)
+      .is("read_at", null);
+
+    if (!error) {
+      await invalidate({ resource: "user_notifications", invalidates: ["list", "many", "detail"] });
+    }
+  };
+
+  const handleItemClick = async (item: NotificationItem) => {
+    if (item.kind === "assignment") {
+      if (item.notification.task_id && item.notification.project_id) {
+        await markAssignmentAsRead(item.notification.id);
+        const params = new URLSearchParams();
+        params.set("projectId", item.notification.project_id);
+        params.set("taskId", item.notification.task_id);
+        navigate(`/kanban?${params.toString()}`);
+        return;
+      }
+
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set("projectId", item.task.project_id);
-    params.set("taskId", item.task.id);
+    params.set("projectId", item.notification.task.project_id);
+    params.set("taskId", item.notification.task.id);
     navigate(`/kanban?${params.toString()}`);
   };
 
@@ -138,7 +256,14 @@ const NotificationBell = () => {
       <Flex align="center" justify="space-between" style={{ marginBottom: 12 }}>
         <Typography.Text strong>Notificaciones</Typography.Text>
         {notifications.length > 0 && (
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={dismissAll}>
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0 }}
+            onClick={() => {
+              void dismissAll();
+            }}
+          >
             Marcar todas como leidas
           </Button>
         )}
@@ -161,7 +286,9 @@ const NotificationBell = () => {
                 alignItems: "flex-start",
                 cursor: "pointer",
               }}
-              onClick={() => handleItemClick(item)}
+              onClick={() => {
+                void handleItemClick(item);
+              }}
               actions={[
                 <Button
                   key="dismiss"
@@ -171,6 +298,11 @@ const NotificationBell = () => {
                   style={{ color: "#94a3b8", flexShrink: 0 }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (item.kind === "assignment") {
+                      void markAssignmentAsRead(item.notification.id);
+                      return;
+                    }
+
                     dismiss(item.key);
                   }}
                 />,
@@ -178,7 +310,11 @@ const NotificationBell = () => {
             >
               <List.Item.Meta
                 avatar={
-                  item.type === "overdue" ? (
+                  item.kind === "assignment" ? (
+                    <TeamOutlined
+                      style={{ color: "#1677ff", fontSize: 18, marginTop: 2 }}
+                    />
+                  ) : item.notification.type === "overdue" ? (
                     <WarningOutlined
                       style={{ color: "#f5222d", fontSize: 18, marginTop: 2 }}
                     />
@@ -190,28 +326,50 @@ const NotificationBell = () => {
                 }
                 title={
                   <Typography.Text style={{ fontSize: 13 }}>
-                    {item.task.title}
+                    {item.kind === "assignment"
+                      ? item.notification.title
+                      : item.notification.task.title}
                   </Typography.Text>
                 }
                 description={
                   <div>
                     <Tag
-                      color={item.type === "overdue" ? "red" : "orange"}
+                      color={
+                        item.kind === "assignment"
+                          ? "blue"
+                          : item.notification.type === "overdue"
+                            ? "red"
+                            : "orange"
+                      }
                       style={{ marginBottom: 4 }}
                     >
-                      {item.type === "overdue" ? "Vencida" : "Vence en 48h"}
+                      {item.kind === "assignment"
+                        ? "Nueva asignacion"
+                        : item.notification.type === "overdue"
+                          ? "Vencida"
+                          : "Vence en 48h"}
                     </Tag>
-                    {item.task.projects?.name && (
+                    {(item.kind === "assignment"
+                      ? item.notification.projects?.name
+                      : item.notification.task.projects?.name) && (
                       <Typography.Text
                         type="secondary"
                         style={{ fontSize: 12, display: "block" }}
                       >
-                        {item.task.projects.name}
+                        {item.kind === "assignment"
+                          ? item.notification.projects?.name
+                          : item.notification.task.projects?.name}
                       </Typography.Text>
                     )}
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {dayjs(item.task.due_date!).format("DD/MM/YYYY")}
-                    </Typography.Text>
+                    {item.kind === "assignment" ? (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {item.notification.body || dayjs(item.notification.created_at).format("DD/MM/YYYY HH:mm")}
+                      </Typography.Text>
+                    ) : (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {dayjs(item.notification.task.due_date!).format("DD/MM/YYYY")}
+                      </Typography.Text>
+                    )}
                   </div>
                 }
               />
