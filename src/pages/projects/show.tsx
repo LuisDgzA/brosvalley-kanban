@@ -211,7 +211,7 @@ export const ProjectsShow = () => {
                 </Descriptions.Item>
                 <Descriptions.Item label="Fecha limite">
                   {project?.due_date ? (
-                    <DateField format="YYYY-MM-DD" value={project.due_date} />
+                    <DateField format="DD/MM/YYYY" value={project.due_date} />
                   ) : (
                     "Sin fecha"
                   )}
@@ -351,7 +351,7 @@ export const ProjectsShow = () => {
                     responsive={["sm"]}
                     title="Fecha limite"
                     render={(value: string | null) =>
-                      value ? <DateField format="YYYY-MM-DD" value={value} /> : "Sin fecha"
+                      value ? <DateField format="DD/MM/YYYY" value={value} /> : "Sin fecha"
                     }
                   />
                 </Table>
