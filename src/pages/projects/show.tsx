@@ -39,11 +39,12 @@ const statusColorMap: Record<string, string> = {
 export const ProjectsShow = () => {
   const { id } = useParams();
   const screens = Grid.useBreakpoint();
-  const { canDeleteProject, canManageProject } = useProjectAccess();
+  const { canAccessProject, canDeleteProject, canManageProject } = useProjectAccess();
   const invalidate = useInvalidate();
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [isSubmittingTag, setIsSubmittingTag] = useState(false);
   const [tagForm] = Form.useForm<{ label: string; color: string }>();
+  const canManageTags = id ? canAccessProject(id) : false;
 
   const { result: project, query: projectQuery } = useOne<ProjectRecord>({
     resource: "projects",
@@ -264,7 +265,7 @@ export const ProjectsShow = () => {
             <Card
               className="glass-card"
               extra={
-                id && canManageProject(id) ? (
+                canManageTags ? (
                   <Button
                     type="primary"
                     onClick={() => {
@@ -289,7 +290,7 @@ export const ProjectsShow = () => {
                   {tags.map((tag) => (
                     <Space key={tag.id} size={6}>
                       <Tag color={tag.color}>{tag.label}</Tag>
-                      {id && canManageProject(id) ? (
+                      {canManageTags ? (
                         <Button size="small" type="link" danger onClick={() => void archiveTag(tag.id)}>
                           Archivar
                         </Button>
